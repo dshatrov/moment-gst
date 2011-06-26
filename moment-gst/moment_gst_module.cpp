@@ -508,30 +508,50 @@ MomentGstModule::audioDataCb (GstPad    * const /* pad */,
 
     Size msg_len = 0;
 
+    Uint64 const timestamp = (Uint64) (GST_BUFFER_TIMESTAMP (buffer) / 1000000);
+
     PagePool::PageListHead page_list;
+    RtmpConnection::PrechunkContext prechunk_ctx;
     {
-//      // Speex audio codec.
-	Byte const video_hdr = 0xbe;
-//	Byte const video_hdr = 0xbf;
-      // Nellymoser audio codec.
-//	Byte const video_hdr = 0x6e;
-//	Byte const video_hdr = 0x7e;
-	self->page_pool->getFillPages (&page_list, ConstMemory::forObject (video_hdr));
+	// Speex audio codec.
+	Byte const audio_hdr = 0xbe;
+
+	// Non-prechunked variant
+	// self->page_pool->getFillPages (&page_list, ConstMemory::forObject (audio_hdr));
+
+	RtmpConnection::fillPrechunkedPages (&prechunk_ctx,
+					     ConstMemory::forObject (audio_hdr),
+					     self->page_pool,
+					     &page_list,
+					     RtmpConnection::DefaultAudioChunkStreamId,
+					     timestamp,
+					     true /* first_chunk */);
+
 	msg_len += 1;
     }
 
-//#error You're filling in non-prechunked pages here. This doesn't make sense for RTMP.
-//#error What's the best way to handle prechunking?
-    self->page_pool->getFillPages (&page_list, ConstMemory (GST_BUFFER_DATA (buffer), GST_BUFFER_SIZE (buffer)));
+    // Non-prechunked variant
+    // self->page_pool->getFillPages (&page_list, ConstMemory (GST_BUFFER_DATA (buffer), GST_BUFFER_SIZE (buffer)));
+
+    Size const prechunk_size = RtmpConnection::PrechunkSize;
+    {
+	RtmpConnection::fillPrechunkedPages (&prechunk_ctx,
+					     ConstMemory (GST_BUFFER_DATA (buffer), GST_BUFFER_SIZE (buffer)),
+					     self->page_pool,
+					     &page_list,
+					     RtmpConnection::DefaultAudioChunkStreamId,
+					     timestamp,
+					     false /* first_chunk */);
+    }
+
     msg_len += GST_BUFFER_SIZE (buffer);
 
 //    hexdump (errs, ConstMemory (GST_BUFFER_DATA (buffer), GST_BUFFER_SIZE (buffer)));
 
-    Uint64 const timestamp = (Uint64) (GST_BUFFER_TIMESTAMP (buffer) / 1000000);
-//    logD_ (_func, "timestamp: ", timestamp);
-
     VideoStream::MessageInfo msg_info;
     msg_info.timestamp = timestamp;
+    msg_info.prechunk_size = prechunk_size;
+    // TODO Fill codec info in msg_info.
 
     video_stream->fireAudioMessage (&msg_info, &page_list, msg_len);
 
@@ -575,29 +595,53 @@ MomentGstModule::videoDataCb (GstPad    * const /* pad */,
 
     Size msg_len = 0;
 
+    Uint64 const timestamp = (Uint64) (GST_BUFFER_TIMESTAMP (buffer) / 1000000);
+
     PagePool::PageListHead page_list;
+    RtmpConnection::PrechunkContext prechunk_ctx;
     {
       // Sorenson H.263 codec.
 	// FIXME This header says that all frames are keyframes, which is not true;
 	Byte const video_hdr = 0x12;
-	self->page_pool->getFillPages (&page_list, ConstMemory::forObject (video_hdr));
+
+	// Non-prechunked variant
+	// self->page_pool->getFillPages (&page_list, ConstMemory::forObject (video_hdr));
+
+	RtmpConnection::fillPrechunkedPages (&prechunk_ctx,
+					     ConstMemory::forObject (video_hdr),
+					     self->page_pool,
+					     &page_list,
+					     RtmpConnection::DefaultVideoChunkStreamId,
+					     timestamp,
+					     true /* first_chunk */);
+
 	msg_len += 1;
     }
 
-//#error You're filling in non-prechunked pages here. This doesn't make sense for RTMP.
-//#error What's the best way to handle prechunking?
-    self->page_pool->getFillPages (&page_list, ConstMemory (GST_BUFFER_DATA (buffer), GST_BUFFER_SIZE (buffer)));
+    // Non-prechunked variant
+    // self->page_pool->getFillPages (&page_list, ConstMemory (GST_BUFFER_DATA (buffer), GST_BUFFER_SIZE (buffer)));
+
+    Size const prechunk_size = RtmpConnection::PrechunkSize;
+    {
+	RtmpConnection::fillPrechunkedPages (&prechunk_ctx,
+					     ConstMemory (GST_BUFFER_DATA (buffer), GST_BUFFER_SIZE (buffer)),
+					     self->page_pool,
+					     &page_list,
+					     RtmpConnection::DefaultVideoChunkStreamId,
+					     timestamp,
+					     false /* first_chunk */);
+    }
+
     msg_len += GST_BUFFER_SIZE (buffer);
 
 //    hexdump (errs, ConstMemory (GST_BUFFER_DATA (buffer), GST_BUFFER_SIZE (buffer)));
 
     // TODO is_keyframe
 
-    Uint64 const timestamp = (Uint64) (GST_BUFFER_TIMESTAMP (buffer) / 1000000);
-//    logD_ (_func, "timestamp: ", timestamp);
-
     VideoStream::MessageInfo msg_info;
     msg_info.timestamp = timestamp;
+    msg_info.prechunk_size = prechunk_size;
+    // TODO Fill codec info in msg_info.
 
     video_stream->fireVideoMessage (&msg_info, &page_list, msg_len);
 
