@@ -32,6 +32,34 @@ void momentGstInit ()
 {
     logD_ ("GST MODULE INIT");
 
+    MomentServer * const moment = MomentServer::getInstance();
+    MConfig::Config * const config = moment->getConfig();
+
+    {
+	ConstMemory const opt_name = "mod_gst/gst_debug";
+	MConfig::Config::BooleanValue const gst_debug = config->getBoolean (opt_name);
+	if (gst_debug == MConfig::Config::Boolean_Invalid) {
+	    logE_ (_func, "Invalid value for ", opt_name);
+	    return;
+	}
+
+	if (gst_debug == MConfig::Config::Boolean_True) {
+	  // Initialization with gstreamer debugging output enabled.
+
+	    int argc = 2;
+	    char* argv [] = {
+		"moment",
+		"--gst-debug=*:3",
+		NULL
+	    };
+
+	    char **argv_ = argv;
+	    gst_init (&argc, &argv_);
+	} else {
+	    gst_init (NULL /* argc */, NULL /* argv */);
+	}
+    }
+
     if (!gst_module.init (MomentServer::getInstance()))
 	logE_ (_func, "gst_module.init() failed");
 }
@@ -50,24 +78,6 @@ namespace M {
 
 void libMary_moduleInit ()
 {
-#if 0
-    {
-      // Initialization with gstreamer debugging output enabled.
-
-	int argc = 2;
-	char* argv [] = {
-	    "moment",
-	    "--gst-debug=*:3",
-	    NULL
-	};
-
-	char **argv_ = argv;
-	gst_init (&argc, &argv_);
-    }
-#endif
-
-    gst_init (NULL /* argc */, NULL /* argv */);
-
     Moment::momentGstInit ();
 }
 
