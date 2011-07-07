@@ -385,14 +385,29 @@ MomentGstModule::createPipeline (Stream * const stream)
 	    logE_ (_func, "gst_element_factory_make() failed (video capsfilter)");
 	    goto _failure;
 	}
-#if 0
-	g_object_set (G_OBJECT (video_capsfilter), "caps",
-		      gst_caps_new_simple ("video/x-raw-yuv",
-					   "width",  G_TYPE_INT, (int) default_width,
-					   "height", G_TYPE_INT, (int) default_height,
-					   "pixel-aspect-ratio", GST_TYPE_FRACTION, 1, 1,
-					   NULL), NULL);
-#endif
+
+	if (default_width && default_height) {
+	    g_object_set (G_OBJECT (video_capsfilter), "caps",
+			  gst_caps_new_simple ("video/x-raw-yuv",
+					       "width",  G_TYPE_INT, (int) default_width,
+					       "height", G_TYPE_INT, (int) default_height,
+					       "pixel-aspect-ratio", GST_TYPE_FRACTION, 1, 1,
+					       NULL), NULL);
+	} else
+	if (default_width) {
+	    g_object_set (G_OBJECT (video_capsfilter), "caps",
+			  gst_caps_new_simple ("video/x-raw-yuv",
+					       "width",  G_TYPE_INT, (int) default_width,
+					       "pixel-aspect-ratio", GST_TYPE_FRACTION, 1, 1,
+					       NULL), NULL);
+	} else
+	if (default_height) {
+	    g_object_set (G_OBJECT (video_capsfilter), "caps",
+			  gst_caps_new_simple ("video/x-raw-yuv",
+					       "height", G_TYPE_INT, (int) default_height,
+					       "pixel-aspect-ratio", GST_TYPE_FRACTION, 1, 1,
+					       NULL), NULL);
+	}
 
 	video_encoder = gst_element_factory_make ("ffenc_flv", NULL);
 	if (!video_encoder) {
@@ -749,8 +764,8 @@ MomentGstModule::MomentGstModule()
     : moment (NULL),
       timers (NULL),
       page_pool (NULL),
-      default_width (320),
-      default_height (240),
+      default_width (0),
+      default_height (0),
       default_bitrate (500000)
 {
 }
