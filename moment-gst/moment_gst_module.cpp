@@ -63,7 +63,7 @@ MomentGstModule::restartStream (Stream * const stream)
 void
 MomentGstModule::noVideoTimerTick (void * const _stream)
 {
-    logD_ (_func_);
+//    logD_ (_func_);
 
     Stream * const stream = static_cast <Stream*> (_stream);
 
@@ -553,7 +553,9 @@ MomentGstModule::audioDataCb (GstPad    * const /* pad */,
     msg_info.prechunk_size = prechunk_size;
     // TODO Fill codec info in msg_info.
 
-    video_stream->fireAudioMessage (&msg_info, &page_list, msg_len);
+//    logD_ (_func, fmt_hex, msg_info.timestamp);
+
+    video_stream->fireAudioMessage (&msg_info, self->page_pool, &page_list, msg_len);
 
     self->page_pool->msgUnref (page_list.first);
 
@@ -636,14 +638,39 @@ MomentGstModule::videoDataCb (GstPad    * const /* pad */,
 
 //    hexdump (errs, ConstMemory (GST_BUFFER_DATA (buffer), GST_BUFFER_SIZE (buffer)));
 
-    // TODO is_keyframe
+    bool is_keyframe = false;
+    if (GST_BUFFER_SIZE (buffer) >= 5) {
+      // See ffmpeg:h263.c
+
+	Byte const format = ((GST_BUFFER_DATA (buffer) [3] & 0x03) << 1) |
+			    ((GST_BUFFER_DATA (buffer) [4] & 0x80) >> 7);
+	size_t offset = 4;
+	switch (format) {
+	    case 0:
+		offset += 2;
+		break;
+	    case 1:
+		offset += 4;
+		break;
+	    default:
+		break;
+	}
+
+	if (GST_BUFFER_SIZE (buffer) > offset) {
+	    if (((GST_BUFFER_DATA (buffer) [offset] & 0x60) >> 4) == 0)
+		is_keyframe = true;
+	}
+    }
 
     VideoStream::MessageInfo msg_info;
     msg_info.timestamp = timestamp;
+    msg_info.is_keyframe = is_keyframe;
     msg_info.prechunk_size = prechunk_size;
     // TODO Fill codec info in msg_info.
 
-    video_stream->fireVideoMessage (&msg_info, &page_list, msg_len);
+//    logD_ (_func, fmt_hex, msg_info.timestamp);
+
+    video_stream->fireVideoMessage (&msg_info, self->page_pool, &page_list, msg_len);
 
     self->page_pool->msgUnref (page_list.first);
 
