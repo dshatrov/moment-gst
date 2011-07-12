@@ -574,8 +574,8 @@ MomentGstModule::audioDataCb (GstPad    * const /* pad */,
 
     self->page_pool->msgUnref (page_list.first);
 
-    // TODO This is a dirty hack!
-    DeferredConnectionSender::pollIterationEnd ();
+    // TEST
+    MomentServer::getInstance()->getServerApp()->getActivePollGroup()->trigger();
 
     return TRUE;
 }
@@ -689,8 +689,8 @@ MomentGstModule::videoDataCb (GstPad    * const /* pad */,
 
     self->page_pool->msgUnref (page_list.first);
 
-    // TODO This is a dirty hack!
-    DeferredConnectionSender::pollIterationEnd ();
+    // TEST
+    MomentServer::getInstance()->getServerApp()->getActivePollGroup()->trigger();
 
     return TRUE;
 }
