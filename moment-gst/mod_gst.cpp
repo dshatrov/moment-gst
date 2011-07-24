@@ -43,7 +43,7 @@ void momentGstInit ()
 	    return;
 	}
 
-	if (enable != MConfig::Config::Boolean_True) {
+	if (enable == MConfig::Config::Boolean_False) {
 	    logI_ (_func, "GStreamer module is not enabled. "
 		   "Set \"", opt_name, "\" option to \"y\" to enable.");
 	    return;
