@@ -29,16 +29,20 @@
 
 namespace Moment {
 
+// If @is_chain is 'true', then @stream_spec is a chain spec with gst-launch
+// syntax. Otherwise, @stream_spec is an uri for uridecodebin2.
 void
 MomentGstModule::createStream (ConstMemory const &stream_name,
-			       ConstMemory const &stream_chain)
+			       ConstMemory const &stream_spec,
+			       bool        const  is_chain)
 {
     Ref<Stream> const stream = grab (new Stream);
     stream->weak_gst_module = this;
     stream->unsafe_gst_module = this;
 
     stream->stream_name  = grab (new String (stream_name));
-    stream->stream_chain = grab (new String (stream_chain));
+    stream->stream_spec = grab (new String (stream_spec));
+    stream->is_chain = is_chain;
 
     createVideoStream (stream);
 
@@ -94,7 +98,8 @@ class MomentGstModule::CreateVideoStream_Data
 public:
     MomentGstModule *gst_module;
     Ref<Stream> stream;
-    Ref<String> stream_chain;
+    Ref<String> stream_spec;
+    bool is_chain;
 };
 
 // Mutex be called with stream->stream_mutex held.
@@ -117,7 +122,8 @@ MomentGstModule::createVideoStream (Stream * const stream)
 
     data->gst_module = this;
     data->stream = stream;
-    data->stream_chain = stream->stream_chain;
+    data->stream_spec = stream->stream_spec;
+    data->is_chain = stream->is_chain;
 
     this->ref ();
     GThread * const thread = g_thread_create (streamThreadFunc,
@@ -230,37 +236,175 @@ MomentGstModule::init (MomentServer * const moment)
 	}
     }
 
-    MConfig::Section * const src_section = config->getSection ("mod_gst/sources");
-    if (!src_section) {
-	logI_ ("No video stream sources specified "
-	       "(\"mod_gst/sources\" config section is missing).");
-	return Result::Success;
+    {
+	MConfig::Section * const src_section = config->getSection ("mod_gst/sources");
+	if (src_section) {
+	    MConfig::Section::iter iter (*src_section);
+	    while (!src_section->iter_done (iter)) {
+		MConfig::SectionEntry * const section_entry = src_section->iter_next (iter);
+		if (section_entry->getType() == MConfig::SectionEntry::Type_Option) {
+		    MConfig::Option * const src_option = static_cast <MConfig::Option*> (section_entry);
+		    if (!src_option->getValue())
+			continue;
+
+		    ConstMemory const stream_name = src_option->getName();
+		    ConstMemory const stream_uri = src_option->getValue()->mem();
+
+		    logD_ (_func, "Stream name: ", stream_name, "; stream uri: ", stream_uri);
+
+		    createStream (stream_name, stream_uri, false /* chain */);
+		}
+	    }
+	} else {
+	    logI_ ("No video stream sources specified "
+		   "(\"mod_gst/sources\" config section is missing).");
+	}
     }
 
-    MConfig::Section::iter iter (*src_section);
-    while (!src_section->iter_done (iter)) {
-	MConfig::SectionEntry * const section_entry = src_section->iter_next (iter);
-	if (section_entry->getType() == MConfig::SectionEntry::Type_Option) {
-	    MConfig::Option * const src_option = static_cast <MConfig::Option*> (section_entry);
-	    if (!src_option->getValue())
-		continue;
+    {
+#if 0
+// Debugging
+	do {
+	    logD_ (_func, "Iterating through \"mod_gst\" section");
+	    MConfig::Section * const root_section = config->getSection ("mod_gst");
+	    MConfig::Section::iter iter (*root_section);
+	    while (!root_section->iter_done (iter)) {
+		MConfig::SectionEntry * const section_entry = root_section->iter_next (iter);
+		switch (section_entry->getType()) {
+		    case MConfig::SectionEntry::Type_Section: {
+			MConfig::Section * const subsection = static_cast <MConfig::Section*> (section_entry);
+			logD_ (_func, section_entry->getName(), ", section");
+		    } break;
+		    default:
+			logD_ (_func, section_entry->getName(), ", not a section");
+		}
+	    }
+	} while (0);
+#endif
 
-	    ConstMemory const stream_name = src_option->getName();
-	    ConstMemory const stream_chain = src_option->getValue()->mem();
+	MConfig::Section * const chains_section = config->getSection ("mod_gst/chains");
+	if (chains_section) {
+	    MConfig::Section::iter iter (*chains_section);
+	    while (!chains_section->iter_done (iter)) {
+		MConfig::SectionEntry * const section_entry = chains_section->iter_next (iter);
+		if (section_entry->getType() == MConfig::SectionEntry::Type_Option) {
+		    MConfig::Option * const chain_option = static_cast <MConfig::Option*> (section_entry);
+		    if (!chain_option->getValue())
+			continue;
 
-	    logD_ (_func, "Stream name: ", stream_name, "; stream chain: ", stream_chain);
+		    ConstMemory const stream_name = chain_option->getName();
+		    ConstMemory const chain_spec = chain_option->getValue()->mem();
 
-	    createStream (stream_name, stream_chain);
+		    createStream (stream_name, chain_spec, true /* chain */);
+		}
+	    }
+	} else {
+	    logI_ ("No custom chains specified "
+		   "(\"mod_gst/chains\" config section is missing).");
 	}
     }
 
     return Result::Success;
 }
 
-// Must be called with stream->stream_mutex held.
 Result
-MomentGstModule::createPipeline (Stream * const stream)
+MomentGstModule::createPipelineForChainSpec (Stream * const stream)
 {
+    assert (stream->is_chain);
+
+    GstElement *chain_el = NULL;
+    GstElement *video_el = NULL;
+    GstElement *audio_el = NULL;
+
+  {
+    GError *error = NULL;
+    chain_el = gst_parse_launch (stream->stream_spec->cstr (), &error);
+    if (!chain_el) {
+	if (error) {
+	    logE_ (_func, "gst_parse_launch() failed: ", error->code,
+		   " ", error->message);
+	} else {
+	    logE_ (_func, "gst_parse_launch() failed");
+	}
+
+	goto _failure;
+    }
+
+    {
+	video_el = gst_bin_get_by_name (GST_BIN (chain_el), "video");
+	if (video_el) {
+	    GstPad * const pad = gst_element_get_static_pad (video_el, "sink");
+	    if (!pad) {
+		logE_ (_func, "element called \"video\" doesn't have a \"sink\" "
+		       "pad. Chain spec: ", stream->stream_spec);
+		goto _failure;
+	    }
+
+	    stream->video_probe_id = gst_pad_add_buffer_probe (
+		    pad, G_CALLBACK (videoDataCb), stream);
+
+	    gst_object_unref (pad);
+	} else {
+	    logW_ (_func, "chain \"", stream->stream_name, "\" does not contain "
+		   "an element named \"video\". There'll be no video "
+		   "for the stream. Chain spec: ", stream->stream_spec);
+	}
+
+	gst_object_unref (video_el);
+	video_el = NULL;
+    }
+
+    {
+	audio_el = gst_bin_get_by_name (GST_BIN (chain_el), "audio");
+	if (audio_el) {
+	    GstPad * const pad = gst_element_get_static_pad (audio_el, "sink");
+	    if (!pad) {
+		logE_ (_func, "element called \"audio\" doesn't have a \"sink\" "
+		       "pad. Chain spec: ", stream->stream_spec);
+		goto _failure;
+	    }
+
+	    stream->audio_probe_id = gst_pad_add_buffer_probe (
+		    pad, G_CALLBACK (audioDataCb), stream);
+
+	    gst_object_unref (pad);
+	} else {
+	    logW_ (_func, "chain \"", stream->stream_name, "\" does not contain "
+		   "an element named \"audio\". There'll be no audio "
+		   "for the stream. Chain spec: ", stream->stream_spec);
+	}
+
+	gst_object_unref (audio_el);
+	audio_el = NULL;
+    }
+
+    logD_ (_func, "chain \"", stream->stream_name, "\" created");
+
+    stream->playbin = chain_el;
+
+    gst_element_set_state (chain_el, GST_STATE_PLAYING);
+
+    return Result::Success;
+  }
+
+_failure:
+    if (chain_el)
+	gst_object_unref (chain_el);
+
+    if (video_el)
+	gst_object_unref (video_el);
+
+    if (audio_el)
+	gst_object_unref (audio_el);
+
+    return Result::Failure;
+}
+
+Result
+MomentGstModule::createPipelineForUri (Stream * const stream)
+{
+    assert (!stream->is_chain);
+
     GstElement *playbin           = NULL,
 	       *audio_encoder_bin = NULL,
 	       *video_encoder_bin = NULL,
@@ -321,8 +465,6 @@ MomentGstModule::createPipeline (Stream * const stream)
 
 	gst_object_unref (pad);
     }
-
-    stream->buffer_probe_valid = true;
 
     {
       // Audio transcoder.
@@ -463,7 +605,7 @@ MomentGstModule::createPipeline (Stream * const stream)
     g_object_set (G_OBJECT (playbin), "video-sink", video_encoder_bin, NULL);
     video_encoder_bin = NULL;
 
-    g_object_set (G_OBJECT (playbin), "uri", stream->stream_chain->cstr(), NULL);
+    g_object_set (G_OBJECT (playbin), "uri", stream->stream_spec->cstr(), NULL);
     gst_element_set_state (playbin, GST_STATE_PLAYING);
   }
 
@@ -495,12 +637,23 @@ _failure:
     return Result::Failure;
 }
 
+// Must be called with stream->stream_mutex held.
+Result
+MomentGstModule::createPipeline (Stream * const stream)
+{
+    if (stream->is_chain)
+	return createPipelineForChainSpec (stream);
+
+    return createPipelineForUri (stream);
+}
+
 gboolean
 MomentGstModule::audioDataCb (GstPad    * const /* pad */,
 			      GstBuffer * const buffer,
 			      gpointer    const _stream)
 {
-//    logD_ (_func, "stream 0x", fmt_hex, (UintPtr) _stream);
+//    logD_ (_func, "stream 0x", fmt_hex, (UintPtr) _stream, ", "
+//	   "timestamp 0x", fmt_hex, GST_BUFFER_TIMESTAMP (buffer));
 
     Stream * const stream = static_cast <Stream*> (_stream);
 
@@ -585,7 +738,8 @@ MomentGstModule::videoDataCb (GstPad    * const /* pad */,
 			      GstBuffer * const buffer,
 			      gpointer    const _stream)
 {
-//    logD_ (_func, "stream 0x", fmt_hex, (UintPtr) _stream);
+//    logD_ (_func, "stream 0x", fmt_hex, (UintPtr) _stream, ", "
+//	   "timestamp 0x", fmt_hex, GST_BUFFER_TIMESTAMP (buffer));
 
     Stream * const stream = static_cast <Stream*> (_stream);
 

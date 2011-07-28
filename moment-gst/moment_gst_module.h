@@ -44,7 +44,8 @@ private:
 	MomentGstModule *unsafe_gst_module;
 
 	Ref<String> stream_name;
-	Ref<String> stream_chain;
+	Ref<String> stream_spec;
+	bool is_chain;
 
 	Timers::TimerKey no_video_timer;
 
@@ -53,7 +54,6 @@ private:
 
 	GstElement *playbin;
 	GstElement *encoder;
-	bool buffer_probe_valid;
 	gulong audio_probe_id;
 	gulong video_probe_id;
 
@@ -62,10 +62,10 @@ private:
 	Mutex stream_mutex;
 
 	Stream ()
-	    : no_video_timer (NULL) /* TODO This nullification should be unnecessary */,
+	    : is_chain (false),
+	      no_video_timer (NULL) /* TODO This nullification should be unnecessary */,
 	      playbin (NULL),
 	      encoder (NULL),
-	      buffer_probe_valid (false),
 	      audio_probe_id (0),
 	      video_probe_id (0),
 	      last_frame_time (0)
@@ -85,7 +85,8 @@ private:
     StreamList stream_list;
 
     void createStream (ConstMemory const &stream_name,
-		       ConstMemory const &stream_chain);
+		       ConstMemory const &stream_spec,
+		       bool               is_chain);
 
     void restartStream (Stream *stream);
 
@@ -98,6 +99,10 @@ private:
     static gpointer streamThreadFunc (gpointer _data);
 
     void closeVideoStream (Stream * const stream);
+
+    Result createPipelineForChainSpec (Stream * const stream);
+
+    Result createPipelineForUri (Stream * const stream);
 
     Result createPipeline (Stream * const stream);
 
