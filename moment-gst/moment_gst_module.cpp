@@ -34,6 +34,7 @@ namespace Moment {
 void
 MomentGstModule::createStream (ConstMemory const &stream_name,
 			       ConstMemory const &stream_spec,
+			       VideoCodec  const  video_codec,
 			       bool        const  is_chain)
 {
     Ref<Stream> const stream = grab (new Stream);
@@ -42,6 +43,7 @@ MomentGstModule::createStream (ConstMemory const &stream_name,
 
     stream->stream_name  = grab (new String (stream_name));
     stream->stream_spec = grab (new String (stream_spec));
+    stream->video_codec = video_codec;
     stream->is_chain = is_chain;
 
     createVideoStream (stream);
@@ -252,7 +254,7 @@ MomentGstModule::init (MomentServer * const moment)
 
 		    logD_ (_func, "Stream name: ", stream_name, "; stream uri: ", stream_uri);
 
-		    createStream (stream_name, stream_uri, false /* chain */);
+		    createStream (stream_name, stream_uri, VideoCodec::SorensonH263, false /* chain */);
 		}
 	    }
 	} else {
@@ -292,10 +294,31 @@ MomentGstModule::init (MomentServer * const moment)
 		    if (!chain_option->getValue())
 			continue;
 
+		    VideoCodec video_codec = VideoCodec::SorensonH263;
+		    {
+			MConfig::Option::iter iter (*chain_option);
+			assert (!chain_option->iter_done (iter));
+			chain_option->iter_next (iter);
+			if (!chain_option->iter_done (iter)) {
+			    ConstMemory const codec_str = chain_option->iter_next (iter)->mem();
+			    if (equal (codec_str, "flv")) {
+				logD_ (_func, "codec: ", codec_str);
+				video_codec = VideoCodec::SorensonH263;
+			    } else
+			    if (equal (codec_str, "flashsv")) {
+				logD_ (_func, "codec: ", codec_str);
+				video_codec = VideoCodec::ScreenVideo;
+			    } else {
+				logW_ (_func, "unknown codec \"", codec_str, "\"specified, ignoring chain");
+				continue;
+			    }
+			}
+		    }
+
 		    ConstMemory const stream_name = chain_option->getName();
 		    ConstMemory const chain_spec = chain_option->getValue()->mem();
 
-		    createStream (stream_name, chain_spec, true /* chain */);
+		    createStream (stream_name, chain_spec, video_codec, true /* chain */);
 		}
 	    }
 	} else {
@@ -344,14 +367,14 @@ MomentGstModule::createPipelineForChainSpec (Stream * const stream)
 		    pad, G_CALLBACK (videoDataCb), stream);
 
 	    gst_object_unref (pad);
+
+	    gst_object_unref (video_el);
+	    video_el = NULL;
 	} else {
 	    logW_ (_func, "chain \"", stream->stream_name, "\" does not contain "
 		   "an element named \"video\". There'll be no video "
 		   "for the stream. Chain spec: ", stream->stream_spec);
 	}
-
-	gst_object_unref (video_el);
-	video_el = NULL;
     }
 
     {
@@ -368,14 +391,14 @@ MomentGstModule::createPipelineForChainSpec (Stream * const stream)
 		    pad, G_CALLBACK (audioDataCb), stream);
 
 	    gst_object_unref (pad);
+
+	    gst_object_unref (audio_el);
+	    audio_el = NULL;
 	} else {
 	    logW_ (_func, "chain \"", stream->stream_name, "\" does not contain "
 		   "an element named \"audio\". There'll be no audio "
 		   "for the stream. Chain spec: ", stream->stream_spec);
 	}
-
-	gst_object_unref (audio_el);
-	audio_el = NULL;
     }
 
     logD_ (_func, "chain \"", stream->stream_name, "\" created");
@@ -768,12 +791,56 @@ MomentGstModule::videoDataCb (GstPad    * const /* pad */,
 
     Uint64 const timestamp = (Uint64) (GST_BUFFER_TIMESTAMP (buffer) / 1000000);
 
+    bool is_keyframe = false;
+    if (stream->video_codec == VideoCodec::SorensonH263) {
+	if (GST_BUFFER_SIZE (buffer) >= 5) {
+	  // See ffmpeg:h263.c
+
+	    Byte const format = ((GST_BUFFER_DATA (buffer) [3] & 0x03) << 1) |
+				((GST_BUFFER_DATA (buffer) [4] & 0x80) >> 7);
+	    size_t offset = 4;
+	    switch (format) {
+		case 0:
+		    offset += 2;
+		    break;
+		case 1:
+		    offset += 4;
+		    break;
+		default:
+		    break;
+	    }
+
+	    if (GST_BUFFER_SIZE (buffer) > offset) {
+		if (((GST_BUFFER_DATA (buffer) [offset] & 0x60) >> 4) == 0)
+		    is_keyframe = true;
+	    }
+	}
+    } else {
+	is_keyframe = true;
+    }
+
     PagePool::PageListHead page_list;
     RtmpConnection::PrechunkContext prechunk_ctx;
     {
-      // Sorenson H.263 codec.
-	// FIXME This header says that all frames are keyframes, which is not true;
-	Byte const video_hdr = 0x12;
+	Byte video_hdr = 0x12; // Sorenson h.263 codec, keyframe.
+	switch (stream->video_codec) {
+	    case VideoCodec::SorensonH263:
+		video_hdr = 0x02;
+		break;
+	    case VideoCodec::ScreenVideo:
+		video_hdr = 0x03;
+		break;
+	    default:
+		unreachable ();
+	}
+
+	if (is_keyframe) {
+	    video_hdr |= 0x10;
+	} else {
+	  // TODO We do not make difference between inter frames and
+	  // disposable inter frames for Sorenson h.263 here.
+	    video_hdr |= 0x20;
+	}
 
 	// Non-prechunked variant
 	// self->page_pool->getFillPages (&page_list, ConstMemory::forObject (video_hdr));
@@ -806,30 +873,6 @@ MomentGstModule::videoDataCb (GstPad    * const /* pad */,
     msg_len += GST_BUFFER_SIZE (buffer);
 
 //    hexdump (errs, ConstMemory (GST_BUFFER_DATA (buffer), GST_BUFFER_SIZE (buffer)));
-
-    bool is_keyframe = false;
-    if (GST_BUFFER_SIZE (buffer) >= 5) {
-      // See ffmpeg:h263.c
-
-	Byte const format = ((GST_BUFFER_DATA (buffer) [3] & 0x03) << 1) |
-			    ((GST_BUFFER_DATA (buffer) [4] & 0x80) >> 7);
-	size_t offset = 4;
-	switch (format) {
-	    case 0:
-		offset += 2;
-		break;
-	    case 1:
-		offset += 4;
-		break;
-	    default:
-		break;
-	}
-
-	if (GST_BUFFER_SIZE (buffer) > offset) {
-	    if (((GST_BUFFER_DATA (buffer) [offset] & 0x60) >> 4) == 0)
-		is_keyframe = true;
-	}
-    }
 
     VideoStream::MessageInfo msg_info;
     msg_info.timestamp = timestamp;

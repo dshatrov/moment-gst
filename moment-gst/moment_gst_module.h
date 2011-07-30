@@ -43,9 +43,10 @@ private:
 	WeakCodeRef weak_gst_module;
 	MomentGstModule *unsafe_gst_module;
 
-	Ref<String> stream_name;
-	Ref<String> stream_spec;
-	bool is_chain;
+	mt_const Ref<String> stream_name;
+	mt_const Ref<String> stream_spec;
+	mt_const VideoCodec video_codec;
+	mt_const bool is_chain;
 
 	Timers::TimerKey no_video_timer;
 
@@ -62,7 +63,8 @@ private:
 	Mutex stream_mutex;
 
 	Stream ()
-	    : is_chain (false),
+	    : video_codec (VideoCodec::SorensonH263),
+	      is_chain (false),
 	      no_video_timer (NULL) /* TODO This nullification should be unnecessary */,
 	      playbin (NULL),
 	      encoder (NULL),
@@ -86,6 +88,7 @@ private:
 
     void createStream (ConstMemory const &stream_name,
 		       ConstMemory const &stream_spec,
+		       VideoCodec         video_codec,
 		       bool               is_chain);
 
     void restartStream (Stream *stream);
