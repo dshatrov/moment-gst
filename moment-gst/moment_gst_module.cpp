@@ -34,7 +34,7 @@ namespace Moment {
 void
 MomentGstModule::createStream (ConstMemory const &stream_name,
 			       ConstMemory const &stream_spec,
-			       VideoCodec  const  video_codec,
+			       VideoStream::VideoCodecId const video_codec,
 			       bool        const  is_chain)
 {
     Ref<Stream> const stream = grab (new Stream);
@@ -254,7 +254,7 @@ MomentGstModule::init (MomentServer * const moment)
 
 		    logD_ (_func, "Stream name: ", stream_name, "; stream uri: ", stream_uri);
 
-		    createStream (stream_name, stream_uri, VideoCodec::SorensonH263, false /* chain */);
+		    createStream (stream_name, stream_uri, VideoStream::VideoCodecId::SorensonH263, false /* chain */);
 		}
 	    }
 	} else {
@@ -294,7 +294,7 @@ MomentGstModule::init (MomentServer * const moment)
 		    if (!chain_option->getValue())
 			continue;
 
-		    VideoCodec video_codec = VideoCodec::SorensonH263;
+		    VideoStream::VideoCodecId video_codec = VideoStream::VideoCodecId::SorensonH263;
 		    {
 			MConfig::Option::iter iter (*chain_option);
 			assert (!chain_option->iter_done (iter));
@@ -303,11 +303,11 @@ MomentGstModule::init (MomentServer * const moment)
 			    ConstMemory const codec_str = chain_option->iter_next (iter)->mem();
 			    if (equal (codec_str, "flv")) {
 				logD_ (_func, "codec: ", codec_str);
-				video_codec = VideoCodec::SorensonH263;
+				video_codec = VideoStream::VideoCodecId::SorensonH263;
 			    } else
 			    if (equal (codec_str, "flashsv")) {
 				logD_ (_func, "codec: ", codec_str);
-				video_codec = VideoCodec::ScreenVideo;
+				video_codec = VideoStream::VideoCodecId::ScreenVideo;
 			    } else {
 				logW_ (_func, "unknown codec \"", codec_str, "\"specified, ignoring chain");
 				continue;
@@ -739,14 +739,14 @@ MomentGstModule::audioDataCb (GstPad    * const /* pad */,
 
 //    hexdump (errs, ConstMemory (GST_BUFFER_DATA (buffer), GST_BUFFER_SIZE (buffer)));
 
-    VideoStream::MessageInfo msg_info;
+    VideoStream::AudioMessageInfo msg_info;
     msg_info.timestamp = timestamp;
     msg_info.prechunk_size = prechunk_size;
     // TODO Fill codec info in msg_info.
 
 //    logD_ (_func, fmt_hex, msg_info.timestamp);
 
-    video_stream->fireAudioMessage (&msg_info, self->page_pool, &page_list, msg_len);
+    video_stream->fireAudioMessage (&msg_info, self->page_pool, &page_list, msg_len, 0 /* msg_offset */);
 
     self->page_pool->msgUnref (page_list.first);
 
@@ -791,8 +791,10 @@ MomentGstModule::videoDataCb (GstPad    * const /* pad */,
 
     Uint64 const timestamp = (Uint64) (GST_BUFFER_TIMESTAMP (buffer) / 1000000);
 
+    VideoStream::VideoMessageInfo msg_info;
+
     bool is_keyframe = false;
-    if (stream->video_codec == VideoCodec::SorensonH263) {
+    if (stream->video_codec == VideoStream::VideoCodecId::SorensonH263) {
 	if (GST_BUFFER_SIZE (buffer) >= 5) {
 	  // See ffmpeg:h263.c
 
@@ -811,11 +813,14 @@ MomentGstModule::videoDataCb (GstPad    * const /* pad */,
 	    }
 
 	    if (GST_BUFFER_SIZE (buffer) > offset) {
-		if (((GST_BUFFER_DATA (buffer) [offset] & 0x60) >> 4) == 0)
+		if (((GST_BUFFER_DATA (buffer) [offset] & 0x60) >> 4) == 0) {
+		    msg_info.frame_type = VideoStream::VideoFrameType::KeyFrame;
 		    is_keyframe = true;
+		}
 	    }
 	}
     } else {
+	msg_info.frame_type = VideoStream::VideoFrameType::KeyFrame;
 	is_keyframe = true;
     }
 
@@ -824,10 +829,10 @@ MomentGstModule::videoDataCb (GstPad    * const /* pad */,
     {
 	Byte video_hdr = 0x12; // Sorenson h.263 codec, keyframe.
 	switch (stream->video_codec) {
-	    case VideoCodec::SorensonH263:
+	    case VideoStream::VideoCodecId::SorensonH263:
 		video_hdr = 0x02;
 		break;
-	    case VideoCodec::ScreenVideo:
+	    case VideoStream::VideoCodecId::ScreenVideo:
 		video_hdr = 0x03;
 		break;
 	    default:
@@ -874,7 +879,6 @@ MomentGstModule::videoDataCb (GstPad    * const /* pad */,
 
 //    hexdump (errs, ConstMemory (GST_BUFFER_DATA (buffer), GST_BUFFER_SIZE (buffer)));
 
-    VideoStream::MessageInfo msg_info;
     msg_info.timestamp = timestamp;
     msg_info.is_keyframe = is_keyframe;
     msg_info.prechunk_size = prechunk_size;
@@ -882,7 +886,7 @@ MomentGstModule::videoDataCb (GstPad    * const /* pad */,
 
 //    logD_ (_func, fmt_hex, msg_info.timestamp);
 
-    video_stream->fireVideoMessage (&msg_info, self->page_pool, &page_list, msg_len);
+    video_stream->fireVideoMessage (&msg_info, self->page_pool, &page_list, msg_len, 0 /* msg_offset */);
 
     self->page_pool->msgUnref (page_list.first);
 

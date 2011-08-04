@@ -45,7 +45,7 @@ private:
 
 	mt_const Ref<String> stream_name;
 	mt_const Ref<String> stream_spec;
-	mt_const VideoCodec video_codec;
+	mt_const VideoStream::VideoCodecId video_codec;
 	mt_const bool is_chain;
 
 	Timers::TimerKey no_video_timer;
@@ -63,7 +63,7 @@ private:
 	Mutex stream_mutex;
 
 	Stream ()
-	    : video_codec (VideoCodec::SorensonH263),
+	    : video_codec (VideoStream::VideoCodecId::SorensonH263),
 	      is_chain (false),
 	      no_video_timer (NULL) /* TODO This nullification should be unnecessary */,
 	      playbin (NULL),
@@ -88,7 +88,7 @@ private:
 
     void createStream (ConstMemory const &stream_name,
 		       ConstMemory const &stream_spec,
-		       VideoCodec         video_codec,
+		       VideoStream::VideoCodecId video_codec,
 		       bool               is_chain);
 
     void restartStream (Stream *stream);
