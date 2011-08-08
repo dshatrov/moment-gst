@@ -1,6 +1,4 @@
 COMMON_CFLAGS =				\
-	-D_POSIX_C_SOURCE=199309L	\
-	-D_XOPEN_SOURCE=600		\
 	-ggdb				\
 	-Wno-long-long -Wall -Wextra	\
 	$(THIS_CFLAGS)
@@ -12,12 +10,8 @@ else
     COMMON_CFLAGS += -rdynamic -pthread
 endif
 
-AM_CFLAGS = -std=c99 $(COMMON_CFLAGS)
-AM_CXXFLAGS = -std=c++0x $(COMMON_CFLAGS)
-
-if PLATFORM_WIN32
-else
-endif
+AM_CFLAGS = -std=gnu99 $(COMMON_CFLAGS)
+AM_CXXFLAGS = -std=gnu++0x $(COMMON_CFLAGS)
 
 INCLUDES = -I$(top_srcdir)
 
