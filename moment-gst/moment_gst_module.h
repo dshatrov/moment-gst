@@ -60,6 +60,8 @@ private:
 
 	Time last_frame_time;
 
+	Count audio_skip_counter;
+
 	Mutex stream_mutex;
 
 	Stream ()
@@ -70,7 +72,8 @@ private:
 	      encoder (NULL),
 	      audio_probe_id (0),
 	      video_probe_id (0),
-	      last_frame_time (0)
+	      last_frame_time (0),
+	      audio_skip_counter (0)
 	{
 	}
     };

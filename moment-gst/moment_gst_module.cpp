@@ -664,6 +664,10 @@ _failure:
 Result
 MomentGstModule::createPipeline (Stream * const stream)
 {
+    // The first two buffers for Speex are headers. They do appear to contain
+    // audio data and their timestamps look random (very large).
+    stream->audio_skip_counter = 2;
+
     if (stream->is_chain)
 	return createPipelineForChainSpec (stream);
 
@@ -683,6 +687,12 @@ MomentGstModule::audioDataCb (GstPad    * const /* pad */,
     Ref<VideoStream> video_stream;
 
     stream->stream_mutex.lock ();
+    if (stream->audio_skip_counter > 0) {
+	--stream->audio_skip_counter;
+//	logD_ (_func, "skipping initial audio frame, ", stream->audio_skip_counter, " left");
+	stream->stream_mutex.unlock ();
+	return TRUE;
+    }
     video_stream = stream->video_stream;
     stream->stream_mutex.unlock ();
 
@@ -700,6 +710,9 @@ MomentGstModule::audioDataCb (GstPad    * const /* pad */,
     Size msg_len = 0;
 
     Uint64 const timestamp = (Uint64) (GST_BUFFER_TIMESTAMP (buffer) / 1000000);
+//    logD_ (_func, "timestamp: 0x", fmt_hex, timestamp, ", size: ", fmt_def, GST_BUFFER_SIZE (buffer));
+//    if (timestamp > 0xffffffff)
+//	hexdump (logs, ConstMemory (GST_BUFFER_DATA (buffer), GST_BUFFER_SIZE (buffer)));
 
     PagePool::PageListHead page_list;
     RtmpConnection::PrechunkContext prechunk_ctx;
@@ -742,7 +755,8 @@ MomentGstModule::audioDataCb (GstPad    * const /* pad */,
     VideoStream::AudioMessageInfo msg_info;
     msg_info.timestamp = timestamp;
     msg_info.prechunk_size = prechunk_size;
-    // TODO Fill codec info in msg_info.
+    msg_info.frame_type = VideoStream::AudioFrameType::RawData;
+    msg_info.codec_id = VideoStream::AudioCodecId::Speex;
 
 //    logD_ (_func, fmt_hex, msg_info.timestamp);
 
@@ -790,8 +804,11 @@ MomentGstModule::videoDataCb (GstPad    * const /* pad */,
     Size msg_len = 0;
 
     Uint64 const timestamp = (Uint64) (GST_BUFFER_TIMESTAMP (buffer) / 1000000);
+//    logD_ (_func, "timestamp: 0x", fmt_hex, timestamp);
 
     VideoStream::VideoMessageInfo msg_info;
+    msg_info.frame_type = VideoStream::VideoFrameType::InterFrame;
+    msg_info.codec_id = stream->video_codec;
 
     bool is_keyframe = false;
     if (stream->video_codec == VideoStream::VideoCodecId::SorensonH263) {
@@ -820,6 +837,7 @@ MomentGstModule::videoDataCb (GstPad    * const /* pad */,
 	    }
 	}
     } else {
+	// TODO Determine actual frame type.
 	msg_info.frame_type = VideoStream::VideoFrameType::KeyFrame;
 	is_keyframe = true;
     }
