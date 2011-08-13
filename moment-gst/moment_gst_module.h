@@ -100,29 +100,45 @@ private:
 
     class CreateVideoStream_Data;
 
-    void createVideoStream (Stream * const stream);
+    void createVideoStream (Stream *stream);
 
     static gpointer streamThreadFunc (gpointer _data);
 
-    void closeVideoStream (Stream * const stream);
+    void closeVideoStream (Stream *stream);
 
-    Result createPipelineForChainSpec (Stream * const stream);
+    Result createPipelineForChainSpec (Stream *stream);
 
-    Result createPipelineForUri (Stream * const stream);
+    Result createPipelineForUri (Stream *stream);
 
-    Result createPipeline (Stream * const stream);
+    Result createPipeline (Stream *stream);
 
-    static gboolean audioDataCb (GstPad    * const pad,
-				 GstBuffer * const buffer,
-				 gpointer    const _stream);
+    static void doAudioData (GstBuffer *buffer,
+			     Stream    *_stream);
 
-    static gboolean videoDataCb (GstPad    * const pad,
-				 GstBuffer * const buffer,
-				 gpointer    const _stream);
+    static gboolean audioDataCb (GstPad    * /* pad */,
+				 GstBuffer *buffer,
+				 gpointer   _stream);
 
-    static gboolean busCallCb (GstBus     * const bus,
-			       GstMessage * const msg,
-			       gpointer     const _stream);
+    static void handoffAudioDataCb (GstElement * /* element */,
+				    GstBuffer  *buffer,
+				    GstPad     * /* pad */,
+				    gpointer    _stream);
+
+    static void doVideoData (GstBuffer *buffer,
+			     Stream    *_stream);
+
+    static gboolean videoDataCb (GstPad    * /* pad */,
+				 GstBuffer *buffer,
+				 gpointer   _stream);
+
+    static void handoffVideoDataCb (GstElement * /* element */,
+				    GstBuffer  *buffer,
+				    GstPad     * /* pad */,
+				    gpointer    _stream);
+
+    static gboolean busCallCb (GstBus     *bus,
+			       GstMessage *msg,
+			       gpointer    _stream);
 
 public:
     Result init (MomentServer *moment);

@@ -29,6 +29,10 @@
 
 namespace Moment {
 
+namespace {
+LogGroup libMary_logGroup_bus ("moment-gst_bus", LogLevel::E);
+}
+
 // If @is_chain is 'true', then @stream_spec is a chain spec with gst-launch
 // syntax. Otherwise, @stream_spec is an uri for uridecodebin2.
 void
@@ -458,15 +462,21 @@ MomentGstModule::createPipelineForUri (Stream * const stream)
 	logE_ (_func, "gst_element_factory_make() failed (fakeaudiosink)");
 	goto _failure;
     }
-    g_object_set (G_OBJECT (fakeaudiosink), "sync", TRUE, NULL);
+    g_object_set (G_OBJECT (fakeaudiosink),
+		  "sync", TRUE,
+		  "signal-handoffs", TRUE, NULL);
 
     fakevideosink = gst_element_factory_make ("fakesink", NULL);
     if (!fakevideosink) {
 	logE_ (_func, "gst_element_factory_make() failed (fakevideosink)");
 	goto _failure;
     }
-    g_object_set (G_OBJECT (fakevideosink), "sync", TRUE, NULL);
+    g_object_set (G_OBJECT (fakevideosink),
+		  "sync", TRUE,
+		  "signal-handoffs", TRUE, NULL);
 
+#if 0
+// Deprecated in favor of "handoff" signal.
     {
 	GstPad * const pad = gst_element_get_static_pad (fakeaudiosink, "sink");
 	stream->audio_probe_id = gst_pad_add_buffer_probe (
@@ -488,6 +498,10 @@ MomentGstModule::createPipelineForUri (Stream * const stream)
 
 	gst_object_unref (pad);
     }
+#endif
+
+    g_signal_connect (fakeaudiosink, "handoff", G_CALLBACK (handoffAudioDataCb), stream);
+    g_signal_connect (fakevideosink, "handoff", G_CALLBACK (handoffVideoDataCb), stream);
 
     {
       // Audio transcoder.
@@ -515,6 +529,7 @@ MomentGstModule::createPipelineForUri (Stream * const stream)
 	    logE_ (_func, "gst_element_factory_make() failed (speexenc)");
 	    goto _failure;
 	}
+//	g_object_set (audio_encoder, "quality", 10, NULL);
 
 	gst_bin_add_many (GST_BIN (audio_encoder_bin), audio_capsfilter, audio_encoder, fakeaudiosink, NULL);
 	gst_element_link_many (audio_capsfilter, audio_encoder, fakeaudiosink, NULL);
@@ -674,15 +689,12 @@ MomentGstModule::createPipeline (Stream * const stream)
     return createPipelineForUri (stream);
 }
 
-gboolean
-MomentGstModule::audioDataCb (GstPad    * const /* pad */,
-			      GstBuffer * const buffer,
-			      gpointer    const _stream)
+void
+MomentGstModule::doAudioData (GstBuffer * const buffer,
+			      Stream    * const stream)
 {
-//    logD_ (_func, "stream 0x", fmt_hex, (UintPtr) _stream, ", "
+//    logD_ (_func, "stream 0x", fmt_hex, (UintPtr) stream, ", "
 //	   "timestamp 0x", fmt_hex, GST_BUFFER_TIMESTAMP (buffer));
-
-    Stream * const stream = static_cast <Stream*> (_stream);
 
     Ref<VideoStream> video_stream;
 
@@ -691,19 +703,19 @@ MomentGstModule::audioDataCb (GstPad    * const /* pad */,
 	--stream->audio_skip_counter;
 //	logD_ (_func, "skipping initial audio frame, ", stream->audio_skip_counter, " left");
 	stream->stream_mutex.unlock ();
-	return TRUE;
+	return;
     }
     video_stream = stream->video_stream;
     stream->stream_mutex.unlock ();
 
     if (!video_stream)
-	return TRUE;
+	return;
 
     CodeRef self_ref;
     if (stream->weak_gst_module.isValid()) {
 	self_ref = stream->weak_gst_module;
 	if (!self_ref)
-	    return TRUE;
+	    return;
     }
     MomentGstModule * const self = stream->unsafe_gst_module;
 
@@ -766,19 +778,34 @@ MomentGstModule::audioDataCb (GstPad    * const /* pad */,
 
     // TEST
     MomentServer::getInstance()->getServerApp()->getActivePollGroup()->trigger();
-
-    return TRUE;
 }
 
 gboolean
-MomentGstModule::videoDataCb (GstPad    * const /* pad */,
+MomentGstModule::audioDataCb (GstPad    * const /* pad */,
 			      GstBuffer * const buffer,
 			      gpointer    const _stream)
 {
-//    logD_ (_func, "stream 0x", fmt_hex, (UintPtr) _stream, ", "
-//	   "timestamp 0x", fmt_hex, GST_BUFFER_TIMESTAMP (buffer));
-
     Stream * const stream = static_cast <Stream*> (_stream);
+    doAudioData (buffer, stream);
+    return TRUE;
+}
+
+void
+MomentGstModule::handoffAudioDataCb (GstElement * const /* element */,
+				     GstBuffer  * const buffer,
+				     GstPad     * const /* pad */,
+				     gpointer     const _stream)
+{
+    Stream * const stream = static_cast <Stream*> (_stream);
+    doAudioData (buffer, stream);
+}
+
+void
+MomentGstModule::doVideoData (GstBuffer * const buffer,
+			      Stream    * const stream)
+{
+//    logD_ (_func, "stream 0x", fmt_hex, (UintPtr) stream, ", "
+//	   "timestamp 0x", fmt_hex, GST_BUFFER_TIMESTAMP (buffer));
 
     Ref<VideoStream> video_stream;
 
@@ -791,13 +818,13 @@ MomentGstModule::videoDataCb (GstPad    * const /* pad */,
     stream->stream_mutex.unlock ();
 
     if (!video_stream)
-	return TRUE;
+	return;
 
     CodeRef self_ref;
     if (stream->weak_gst_module.isValid()) {
 	self_ref = stream->weak_gst_module;
 	if (!self_ref)
-	    return TRUE;
+	    return;
     }
     MomentGstModule * const self = stream->unsafe_gst_module;
 
@@ -910,8 +937,26 @@ MomentGstModule::videoDataCb (GstPad    * const /* pad */,
 
     // TEST
     MomentServer::getInstance()->getServerApp()->getActivePollGroup()->trigger();
+}
 
+gboolean
+MomentGstModule::videoDataCb (GstPad    * const /* pad */,
+			      GstBuffer * const buffer,
+			      gpointer    const _stream)
+{
+    Stream * const stream = static_cast <Stream*> (_stream);
+    doVideoData (buffer, stream);
     return TRUE;
+}
+
+void
+MomentGstModule::handoffVideoDataCb (GstElement * const /* element */,
+				     GstBuffer  * const buffer,
+				     GstPad     * const /* pad */,
+				     gpointer     const _stream)
+{
+    Stream * const stream = static_cast <Stream*> (_stream);
+    doVideoData (buffer, stream);
 }
 
 gboolean
@@ -919,7 +964,7 @@ MomentGstModule::busCallCb (GstBus     * const /* bus */,
 			    GstMessage * const msg,
 			    gpointer     const _stream)
 {
-//    logD_ (_func, gst_message_type_get_name (GST_MESSAGE_TYPE (msg)));
+    logD (bus, _func, gst_message_type_get_name (GST_MESSAGE_TYPE (msg)));
 
     Stream * const stream = static_cast <Stream*> (_stream);
 
@@ -932,8 +977,8 @@ MomentGstModule::busCallCb (GstBus     * const /* bus */,
 //    MomentGstModule * const self = stream->unsafe_gst_module;
 
     if (GST_MESSAGE_SRC (msg) == GST_OBJECT (stream->playbin)) {
-	logD_ (_func, "PIPELINE MESSAGE");
-	logD_ (_func, gst_message_type_get_name (GST_MESSAGE_TYPE (msg)));
+	logD (bus, _func, "PIPELINE MESSAGE");
+	logD (bus, _func, gst_message_type_get_name (GST_MESSAGE_TYPE (msg)));
 
 	if (GST_MESSAGE_TYPE (msg) == GST_MESSAGE_STATE_CHANGED) {
 	    GstState new_state,
@@ -942,15 +987,20 @@ MomentGstModule::busCallCb (GstBus     * const /* bus */,
 	    if (pending_state == GST_STATE_VOID_PENDING
 		&& new_state != GST_STATE_PLAYING)
 	    {
-		logD_ (_func, "PIPELINE READY");
+		logD (bus, _func, "PIPELINE READY");
 		gst_element_set_state (stream->playbin, GST_STATE_PLAYING);
 	    }
 	}
     }
 
     switch (GST_MESSAGE_TYPE (msg)) {
+	case GST_MESSAGE_BUFFERING: {
+	    gint percent = 0;
+	    gst_message_parse_buffering (msg, &percent);
+	    logD (bus, _func, "GST_MESSAGE_BUFFERING ", percent, "%");
+	} break;
 	case GST_MESSAGE_EOS: {
-	    logE_ (_func, "GST_MESSAGE_EOS");
+	    logE (bus, _func, "GST_MESSAGE_EOS");
 
 	  // The stream will be restarted gracefully by noVideoTimerTick().
 	  // We do not restart the stream here immediately to avoid triggering
@@ -963,7 +1013,7 @@ MomentGstModule::busCallCb (GstBus     * const /* bus */,
 #endif
 	} break;
 	case GST_MESSAGE_ERROR: {
-	    logE_ (_func, "GST_MESSAGE_ERROR");
+	    logE (bus, _func, "GST_MESSAGE_ERROR");
 
 #if 0
 	    stream->stream_mutex.lock ();
