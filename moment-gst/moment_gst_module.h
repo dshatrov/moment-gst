@@ -58,9 +58,26 @@ private:
 	gulong audio_probe_id;
 	gulong video_probe_id;
 
-	Time last_frame_time;
+	RtmpServer::MetaData metadata;
 
-	Count audio_skip_counter;
+	mt_mutex (stream_mutex) Time last_frame_time;
+
+	// TODO Unify with 'video_codec'.
+	mt_mutex (stream_mutex) VideoStream::AudioCodecId audio_codec_id;
+	mt_mutex (stream_mutex) Byte audio_hdr;
+
+	mt_mutex (stream_mutex) Cond metadata_reported_cond;
+	mt_mutex (stream_mutex) bool metadata_reported;
+
+	mt_mutex (stream_mutex) bool got_video;
+	mt_mutex (stream_mutex) bool got_audio;
+
+	mt_mutex (stream_mutex) bool first_audio_frame;
+	mt_mutex (stream_mutex) Count audio_skip_counter;
+
+	mt_mutex (stream_mutex) bool first_video_frame;
+
+	mt_mutex (stream_mutex) Uint64 prv_audio_timestamp;
 
 	Mutex stream_mutex;
 
@@ -73,18 +90,28 @@ private:
 	      audio_probe_id (0),
 	      video_probe_id (0),
 	      last_frame_time (0),
-	      audio_skip_counter (0)
+	      audio_codec_id (VideoStream::AudioCodecId::Unknown),
+	      audio_hdr (0xbe /* Speex */),
+	      metadata_reported (false),
+	      got_video (false),
+	      got_audio (false),
+	      first_audio_frame (true),
+	      audio_skip_counter (0),
+	      first_video_frame (true),
+	      prv_audio_timestamp (0)
 	{
 	}
     };
 
-    MomentServer *moment;
-    Timers *timers;
-    PagePool *page_pool;
+    mt_const MomentServer *moment;
+    mt_const Timers *timers;
+    mt_const PagePool *page_pool;
 
-    Uint64 default_width;
-    Uint64 default_height;
-    Uint64 default_bitrate;
+    mt_const bool send_metadata;
+
+    mt_const Uint64 default_width;
+    mt_const Uint64 default_height;
+    mt_const Uint64 default_bitrate;
 
     typedef IntrusiveList<Stream> StreamList;
     StreamList stream_list;
@@ -104,16 +131,18 @@ private:
 
     static gpointer streamThreadFunc (gpointer _data);
 
-    void closeVideoStream (Stream *stream);
+    mt_mutex (stream->stream_mutex) void closeVideoStream (Stream *stream);
 
     Result createPipelineForChainSpec (Stream *stream);
 
     Result createPipelineForUri (Stream *stream);
 
-    Result createPipeline (Stream *stream);
+    mt_mutex (stream->stream_mutex) Result createPipeline (Stream *stream);
+
+    mt_mutex (stream->stream_mutex) static void reportMetaData (Stream *stream);
 
     static void doAudioData (GstBuffer *buffer,
-			     Stream    *_stream);
+			     Stream    *stream);
 
     static gboolean audioDataCb (GstPad    * /* pad */,
 				 GstBuffer *buffer,
@@ -125,7 +154,7 @@ private:
 				    gpointer    _stream);
 
     static void doVideoData (GstBuffer *buffer,
-			     Stream    *_stream);
+			     Stream    *stream);
 
     static gboolean videoDataCb (GstPad    * /* pad */,
 				 GstBuffer *buffer,
