@@ -866,10 +866,30 @@ MomentGstModule::doAudioData (GstBuffer * const buffer,
 	    stream->audio_codec_id = VideoStream::AudioCodecId::Speex;
 	    stream->audio_hdr = 0xb6; // Speex, 11 kHz, 16-bit samples, mono
 	} else
+	if (equal (structure_name_mem, "audio/x-nellymoser")) {
+	  // Nellymoser
+	    stream->audio_codec_id = VideoStream::AudioCodecId::Nellymoser;
+	    stream->audio_hdr = 0x6e; // Nellymoser, 44 kHz, 16-bit samples, mono
+	} else
 	if (equal (structure_name_mem, "audio/x-adpcm")) {
 	  // ADPCM
 	    stream->audio_codec_id = VideoStream::AudioCodecId::ADPCM;
 	    stream->audio_hdr = 0x1e; // ADPCM, 44 kHz, 16-bit samples, mono
+	} else
+	if (equal (structure_name_mem, "audio/x-raw-int")) {
+	  // Linear PCM, little endian
+	    stream->audio_codec_id = VideoStream::AudioCodecId::LinearPcmLittleEndian;
+	    stream->audio_hdr = 0x3e; // Linear PCM (little endian), 44 kHz, 16-bit samples, mono
+	} else
+	if (equal (structure_name_mem, "audio/x-alaw")) {
+	  // G.711 A-law logarithmic PCM
+	    stream->audio_codec_id = VideoStream::AudioCodecId::G711ALaw;
+	    stream->audio_hdr = 0x7e; // G.711 A-law, 44 kHz, 16-bit samples, mono
+	} else
+	if (equal (structure_name_mem, "audio/x-mulaw")) {
+	  // G.711 mu-law logarithmic PCM
+	    stream->audio_codec_id = VideoStream::AudioCodecId::G711MuLaw;
+	    stream->audio_hdr = 0x8e; // G.711 mu-law, 44 kHz, 16-bit samples, mono
 	}
 
 	if (channels > 1) {
