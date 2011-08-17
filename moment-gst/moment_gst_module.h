@@ -45,7 +45,7 @@ private:
 
 	mt_const Ref<String> stream_name;
 	mt_const Ref<String> stream_spec;
-	mt_const VideoStream::VideoCodecId video_codec;
+	mt_const VideoStream::VideoCodecId encoder_video_codec;
 	mt_const bool is_chain;
 
 	Timers::TimerKey no_video_timer;
@@ -66,6 +66,9 @@ private:
 	mt_mutex (stream_mutex) VideoStream::AudioCodecId audio_codec_id;
 	mt_mutex (stream_mutex) Byte audio_hdr;
 
+	mt_mutex (stream_mutex) VideoStream::VideoCodecId video_codec_id;
+	mt_mutex (stream_mutex) Byte video_hdr;
+
 	mt_mutex (stream_mutex) Cond metadata_reported_cond;
 	mt_mutex (stream_mutex) bool metadata_reported;
 
@@ -82,7 +85,7 @@ private:
 	Mutex stream_mutex;
 
 	Stream ()
-	    : video_codec (VideoStream::VideoCodecId::SorensonH263),
+	    : encoder_video_codec (VideoStream::VideoCodecId::SorensonH263),
 	      is_chain (false),
 	      no_video_timer (NULL) /* TODO This nullification should be unnecessary */,
 	      playbin (NULL),
@@ -92,6 +95,8 @@ private:
 	      last_frame_time (0),
 	      audio_codec_id (VideoStream::AudioCodecId::Unknown),
 	      audio_hdr (0xbe /* Speex */),
+	      video_codec_id (VideoStream::VideoCodecId::Unknown),
+	      video_hdr (0x02 /* Sorenson H.263 */),
 	      metadata_reported (false),
 	      got_video (false),
 	      got_audio (false),
