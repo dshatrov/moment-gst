@@ -1316,7 +1316,6 @@ MomentGstModule::doVideoData (GstBuffer * const buffer,
 //    hexdump (errs, ConstMemory (GST_BUFFER_DATA (buffer), GST_BUFFER_SIZE (buffer)));
 
     msg_info.timestamp = timestamp;
-    msg_info.is_keyframe = is_keyframe;
     msg_info.prechunk_size = RtmpConnection::PrechunkSize;
 
     video_stream->fireVideoMessage (&msg_info, self->page_pool, &page_list, msg_len, 0 /* msg_offset */);
