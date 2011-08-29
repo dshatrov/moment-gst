@@ -984,7 +984,7 @@ MomentGstModule::doAudioData (GstBuffer * const buffer,
 					     true /* first_chunk */);
 	msg_len += sizeof (aac_audio_hdr);
 
-//	logD_ (_func, "AAC SEQUENCE HEADER");
+	logD_ (_func, "AAC SEQUENCE HEADER");
 	hexdump (logs, ConstMemory (GST_BUFFER_DATA (aac_codec_data_buffer), GST_BUFFER_SIZE (aac_codec_data_buffer)));
 
 	RtmpConnection::fillPrechunkedPages (&prechunk_ctx,
@@ -1202,7 +1202,7 @@ MomentGstModule::doVideoData (GstBuffer * const buffer,
 					     true /* first_chunk */);
 	msg_len += sizeof (avc_video_hdr);
 
-//	logD_ (_func, "AVC SEQUENCE HEADER");
+	logD_ (_func, "AVC SEQUENCE HEADER");
 	hexdump (logs, ConstMemory (GST_BUFFER_DATA (avc_codec_data_buffer), GST_BUFFER_SIZE (avc_codec_data_buffer)));
 
 	RtmpConnection::fillPrechunkedPages (&prechunk_ctx,

@@ -31,7 +31,6 @@ libmoment_gst_1_0_la_SOURCES =	\
 
 moment_gst_extra_dist =
 
-#libmoment_gst_1_0_ladir = $(libdir)/moment-1.0/
 libmoment_gst_1_0_la_LDFLAGS = -no-undefined -version-info "0:0:0"
 libmoment_gst_1_0_la_LIBADD = $(THIS_LIBS)
 if PLATFORM_WIN32
