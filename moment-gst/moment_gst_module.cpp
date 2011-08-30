@@ -749,23 +749,19 @@ MomentGstModule::reportMetaData (Stream * const stream)
     if (!self->send_metadata)
 	return;
 
-    PagePool::PageListHead page_list;
-    Size msg_len;
-    VideoStream::VideoMessageInfo msg_info;
+    VideoStream::VideoMessage msg;
     if (!RtmpServer::encodeMetaData (&stream->metadata,
 				     self->page_pool,
-				     &page_list,
-				     &msg_len,
-				     &msg_info))
+				     &msg))
     {
 	logE_ (_func, "encodeMetaData() failed");
 	return;
     }
 
     logD_ (_func, "Firing video message");
-    stream->video_stream->fireVideoMessage (&msg_info, self->page_pool, &page_list, msg_len, 0 /* msg_offset */);
+    stream->video_stream->fireVideoMessage (&msg);
 
-    self->page_pool->msgUnref (page_list.first);
+    self->page_pool->msgUnref (msg.page_list.first);
 }
 
 void
@@ -997,13 +993,18 @@ MomentGstModule::doAudioData (GstBuffer * const buffer,
 					     false /* first_chunk */);
 	msg_len += GST_BUFFER_SIZE (aac_codec_data_buffer);
 
-	VideoStream::AudioMessageInfo msg_info;
-	msg_info.timestamp = timestamp;
-	msg_info.prechunk_size = RtmpConnection::PrechunkSize;
-	msg_info.frame_type = VideoStream::AudioFrameType::AacSequenceHeader;
-	msg_info.codec_id = audio_codec_id;
+	VideoStream::AudioMessage msg;
+	msg.timestamp = timestamp;
+	msg.prechunk_size = RtmpConnection::PrechunkSize;
+	msg.frame_type = VideoStream::AudioFrameType::AacSequenceHeader;
+	msg.codec_id = audio_codec_id;
 
-	video_stream->fireAudioMessage (&msg_info, self->page_pool, &page_list, msg_len, 0 /* msg_offset */);
+	msg.page_pool = self->page_pool;
+	msg.page_list = page_list;
+	msg.msg_len = msg_len;
+	msg.msg_offset = 0;
+
+	video_stream->fireAudioMessage (&msg);
 
 	self->page_pool->msgUnref (page_list.first);
     }
@@ -1049,15 +1050,20 @@ MomentGstModule::doAudioData (GstBuffer * const buffer,
 
 //    hexdump (errs, ConstMemory (GST_BUFFER_DATA (buffer), GST_BUFFER_SIZE (buffer)));
 
-    VideoStream::AudioMessageInfo msg_info;
-    msg_info.timestamp = timestamp;
-    msg_info.prechunk_size = RtmpConnection::PrechunkSize;
-    msg_info.frame_type = VideoStream::AudioFrameType::RawData;
-    msg_info.codec_id = audio_codec_id;
+    VideoStream::AudioMessage msg;
+    msg.timestamp = timestamp;
+    msg.prechunk_size = RtmpConnection::PrechunkSize;
+    msg.frame_type = VideoStream::AudioFrameType::RawData;
+    msg.codec_id = audio_codec_id;
 
-//    logD_ (_func, fmt_hex, msg_info.timestamp);
+    msg.page_pool = self->page_pool;
+    msg.page_list = page_list;
+    msg.msg_len = msg_len;
+    msg.msg_offset = 0;
 
-    video_stream->fireAudioMessage (&msg_info, self->page_pool, &page_list, msg_len, 0 /* msg_offset */);
+//    logD_ (_func, fmt_hex, msg.timestamp);
+
+    video_stream->fireAudioMessage (&msg);
 
     self->page_pool->msgUnref (page_list.first);
 
@@ -1215,13 +1221,18 @@ MomentGstModule::doVideoData (GstBuffer * const buffer,
 					     false /* first_chunk */);
 	msg_len += GST_BUFFER_SIZE (avc_codec_data_buffer);
 
-	VideoStream::VideoMessageInfo msg_info;
-	msg_info.timestamp = timestamp;
-	msg_info.prechunk_size = RtmpConnection::PrechunkSize;
-	msg_info.frame_type = VideoStream::VideoFrameType::AvcSequenceHeader;
-	msg_info.codec_id = video_codec_id;
+	VideoStream::VideoMessage msg;
+	msg.timestamp = timestamp;
+	msg.prechunk_size = RtmpConnection::PrechunkSize;
+	msg.frame_type = VideoStream::VideoFrameType::AvcSequenceHeader;
+	msg.codec_id = video_codec_id;
 
-	video_stream->fireVideoMessage (&msg_info, self->page_pool, &page_list, msg_len, 0 /* msg_offset */);
+	msg.page_pool = self->page_pool;
+	msg.page_list = page_list;
+	msg.msg_len = msg_len;
+	msg.msg_offset = 0;
+
+	video_stream->fireVideoMessage (&msg);
 
 	self->page_pool->msgUnref (page_list.first);
     }
@@ -1231,9 +1242,9 @@ MomentGstModule::doVideoData (GstBuffer * const buffer,
     Uint64 const timestamp = (Uint64) (GST_BUFFER_TIMESTAMP (buffer) / 1000000);
 //    logD_ (_func, "timestamp: 0x", fmt_hex, timestamp);
 
-    VideoStream::VideoMessageInfo msg_info;
-    msg_info.frame_type = VideoStream::VideoFrameType::InterFrame;
-    msg_info.codec_id = video_codec_id;
+    VideoStream::VideoMessage msg;
+    msg.frame_type = VideoStream::VideoFrameType::InterFrame;
+    msg.codec_id = video_codec_id;
 
     Byte gen_video_hdr [5];
     Size gen_video_hdr_len = 1;
@@ -1281,7 +1292,7 @@ MomentGstModule::doVideoData (GstBuffer * const buffer,
     }
 
     if (is_keyframe) {
-	msg_info.frame_type = VideoStream::VideoFrameType::KeyFrame;
+	msg.frame_type = VideoStream::VideoFrameType::KeyFrame;
 	gen_video_hdr [0] |= 0x10;
     } else {
       // TODO We do not make difference between inter frames and
@@ -1315,10 +1326,15 @@ MomentGstModule::doVideoData (GstBuffer * const buffer,
 
 //    hexdump (errs, ConstMemory (GST_BUFFER_DATA (buffer), GST_BUFFER_SIZE (buffer)));
 
-    msg_info.timestamp = timestamp;
-    msg_info.prechunk_size = RtmpConnection::PrechunkSize;
+    msg.timestamp = timestamp;
+    msg.prechunk_size = RtmpConnection::PrechunkSize;
 
-    video_stream->fireVideoMessage (&msg_info, self->page_pool, &page_list, msg_len, 0 /* msg_offset */);
+    msg.page_pool = self->page_pool;
+    msg.page_list = page_list;
+    msg.msg_len = msg_len;
+    msg.msg_offset = 0;
+
+    video_stream->fireVideoMessage (&msg);
 
     self->page_pool->msgUnref (page_list.first);
 
