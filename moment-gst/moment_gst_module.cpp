@@ -118,9 +118,9 @@ MomentGstModule::createVideoStream (Stream * const stream)
     CreateVideoStream_Data * const data = new CreateVideoStream_Data;
     assert (data);
 
-    if (stream->no_video_timer)
+    if (stream->no_video_timer) {
 	timers->restartTimer (stream->no_video_timer);
-    else {
+    } else {
 	// TODO Update time efficiently.
 	updateTime ();
 	stream->no_video_timer = timers->addTimer (noVideoTimerTick, stream, stream, 15 /* TODO config param for the timeout */, true /* periodical */);
