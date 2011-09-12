@@ -115,33 +115,36 @@ MomentGstModule::createVideoStream (Stream * const stream)
     stream->video_stream = grab (new VideoStream);
     stream->video_stream_key = moment->addVideoStream (stream->video_stream, stream->stream_name->mem());
 
-    CreateVideoStream_Data * const data = new CreateVideoStream_Data;
-    assert (data);
-
     if (stream->no_video_timer) {
 	timers->restartTimer (stream->no_video_timer);
     } else {
 	// TODO Update time efficiently.
 	updateTime ();
+	// TODO Release stream->no_video_timer with timers->deleteTimer() at some point.
 	stream->no_video_timer = timers->addTimer (noVideoTimerTick, stream, stream, 15 /* TODO config param for the timeout */, true /* periodical */);
     }
 
-    data->gst_module = this;
-    data->stream = stream;
-    data->stream_spec = stream->stream_spec;
-    data->is_chain = stream->is_chain;
+    {
+	CreateVideoStream_Data * const data = new CreateVideoStream_Data;
+	assert (data);
 
-    this->ref ();
-    GThread * const thread = g_thread_create (streamThreadFunc,
-					      data,
-					      FALSE /* joinable */,
-					      NULL  /* error */);
-    if (thread == NULL) {
-	logE_ (_func, "g_thread_create() failed");
-	this->unref ();
-	moment->removeVideoStream (stream->video_stream_key);
-	stream->video_stream = NULL;
-	delete data;
+	data->gst_module = this;
+	data->stream = stream;
+	data->stream_spec = stream->stream_spec;
+	data->is_chain = stream->is_chain;
+
+	this->ref ();
+	GThread * const thread = g_thread_create (streamThreadFunc,
+						  data,
+						  FALSE /* joinable */,
+						  NULL  /* error */);
+	if (thread == NULL) {
+	    logE_ (_func, "g_thread_create() failed");
+	    this->unref ();
+	    moment->removeVideoStream (stream->video_stream_key);
+	    stream->video_stream = NULL;
+	    delete data;
+	}
     }
 }
 
