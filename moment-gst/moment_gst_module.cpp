@@ -64,6 +64,8 @@ MomentGstModule::createStream (ConstMemory const &stream_name,
 	stream->recorder.init (stream->recorder_thread_ctx, moment->getStorage());
     }
 
+    stream->flv_muxer.setPagePool (page_pool);
+
     stream->recorder.setMuxer (&stream->flv_muxer);
 // TODO recorder frontend + error reporting
 //    stream->recorder.setFrontend (CbDesc<AvRecorder::Frontend> (
