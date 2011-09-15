@@ -45,6 +45,7 @@ private:
 
 	mt_const Ref<String> stream_name;
 	mt_const Ref<String> stream_spec;
+	// TODO Unused
 	mt_const VideoStream::VideoCodecId encoder_video_codec;
 	mt_const bool is_chain;
 
@@ -53,12 +54,18 @@ private:
 	Ref<VideoStream> video_stream;
 	MomentServer::VideoStreamKey video_stream_key;
 
+	ServerThreadContext *recorder_thread_ctx;
+	AvRecorder recorder;
+	bool recording;
+	ConstMemory record_filename;
+	FlvMuxer flv_muxer;
+
 	GstElement *playbin;
 	GstElement *encoder;
 	gulong audio_probe_id;
 	gulong video_probe_id;
 
-	RtmpServer::MetaData metadata;
+	mt_mutex (stream_mutex) RtmpServer::MetaData metadata;
 
 	mt_mutex (stream_mutex) Time last_frame_time;
 
@@ -88,6 +95,11 @@ private:
 	    : encoder_video_codec (VideoStream::VideoCodecId::SorensonH263),
 	      is_chain (false),
 	      no_video_timer (NULL) /* TODO This nullification should be unnecessary */,
+
+	      recorder_thread_ctx (NULL),
+	      recorder (this /* coderef_container */),
+	      recording (false),
+
 	      playbin (NULL),
 	      encoder (NULL),
 	      audio_probe_id (0),
@@ -124,15 +136,17 @@ private:
     void createStream (ConstMemory const &stream_name,
 		       ConstMemory const &stream_spec,
 		       VideoStream::VideoCodecId video_codec,
-		       bool               is_chain);
+		       bool               is_chain,
+		       bool               recording,
+		       ConstMemory        record_filename);
 
-    void restartStream (Stream *stream);
+    mt_mutex (stream->stream_mutex) void restartStream (Stream *stream);
 
     static void noVideoTimerTick (void *_stream);
 
     class CreateVideoStream_Data;
 
-    void createVideoStream (Stream *stream);
+    mt_mutex (stream->stream_mutex) void createVideoStream (Stream *stream);
 
     static gpointer streamThreadFunc (gpointer _data);
 
