@@ -38,8 +38,11 @@ LogGroup libMary_logGroup_bus ("moment-gst_bus", LogLevel::E);
 void
 MomentGstModule::createStream (ConstMemory const &stream_name,
 			       ConstMemory const &stream_spec,
+			       // FIXME @video_codec is effectively unused now
 			       VideoStream::VideoCodecId const video_codec,
-			       bool        const  is_chain)
+			       bool        const  is_chain,
+			       bool        const  recording,
+			       ConstMemory const  record_filename)
 {
     Ref<Stream> const stream = grab (new Stream);
     stream->weak_gst_module = this;
@@ -49,6 +52,22 @@ MomentGstModule::createStream (ConstMemory const &stream_name,
     stream->stream_spec = grab (new String (stream_spec));
     stream->encoder_video_codec = video_codec;
     stream->is_chain = is_chain;
+
+    stream->recording = recording;
+    stream->record_filename = record_filename;
+
+    stream->recorder_thread_ctx = moment->getRecorderThreadPool()->grabThreadContext (stream->record_filename);
+    if (!stream->recorder_thread_ctx) {
+	logE_ (_func, "Couldn't get recorder thread context: ", exc->toString());
+	stream->recording = false;
+    } else {
+	stream->recorder.init (stream->recorder_thread_ctx, moment->getStorage());
+    }
+
+    stream->recorder.setMuxer (&stream->flv_muxer);
+// TODO recorder frontend + error reporting
+//    stream->recorder.setFrontend (CbDesc<AvRecorder::Frontend> (
+//	    recorder_frontend, stream /* cb_data */, stream /* coderef_container */));
 
     createVideoStream (stream);
 
@@ -61,9 +80,7 @@ MomentGstModule::createStream (ConstMemory const &stream_name,
     stream->ref ();
 }
 
-// Must be called with stream->stream_mutex held.
-// TODO Spawn a separate thread to actually restart the stream.
-void
+mt_mutex (stream->stream_mutex) void
 MomentGstModule::restartStream (Stream * const stream)
 {
     closeVideoStream (stream);
@@ -108,12 +125,18 @@ public:
     bool is_chain;
 };
 
-// Mutex be called with stream->stream_mutex held.
-void
+mt_mutex (stream->stream_mutex) void
 MomentGstModule::createVideoStream (Stream * const stream)
 {
     stream->video_stream = grab (new VideoStream);
     stream->video_stream_key = moment->addVideoStream (stream->video_stream, stream->stream_name->mem());
+
+    stream->recorder.stop ();
+    stream->recorder.setVideoStream (stream->video_stream);
+    if (stream->recording) {
+	logD_ (_func, "calling recorder.start(), record path: ", stream->record_filename);
+	stream->recorder.start (stream->record_filename);
+    }
 
     if (stream->no_video_timer) {
 	timers->restartTimer (stream->no_video_timer);
@@ -277,7 +300,12 @@ MomentGstModule::init (MomentServer * const moment)
 
 		    logD_ (_func, "Stream name: ", stream_name, "; stream uri: ", stream_uri);
 
-		    createStream (stream_name, stream_uri, VideoStream::VideoCodecId::SorensonH263, false /* chain */);
+		    createStream (stream_name,
+				  stream_uri,
+				  VideoStream::VideoCodecId::SorensonH263,
+				  false /* chain */,
+				  false /* recording */,
+				  ConstMemory() /* record_filename */);
 		}
 	    }
 	} else {
@@ -341,7 +369,75 @@ MomentGstModule::init (MomentServer * const moment)
 		    ConstMemory const stream_name = chain_option->getName();
 		    ConstMemory const chain_spec = chain_option->getValue()->mem();
 
-		    createStream (stream_name, chain_spec, video_codec, true /* chain */);
+		    createStream (stream_name,
+				  chain_spec,
+				  video_codec,
+				  true /* chain */,
+				  false /* recording */,
+				  ConstMemory() /* record_filename */);
+		} else
+		if (section_entry->getType() == MConfig::SectionEntry::Type_Section) {
+		    MConfig::Section * const section = static_cast <MConfig::Section*> (section_entry);
+
+		    ConstMemory stream_name;
+		    bool got_stream_name = false;
+
+		    ConstMemory chain_spec;
+		    bool got_chain_spec = false;
+
+		    ConstMemory record_path;
+		    bool got_record_path = false;
+
+		    {
+			MConfig::Section::iter iter (*section);
+			while (!section->iter_done (iter)) {
+			    MConfig::SectionEntry * const section_entry = section->iter_next (iter);
+			    if (section_entry->getType() != MConfig::SectionEntry::Type_Option)
+				continue;
+
+			    MConfig::Option * const option = static_cast <MConfig::Option*> (section_entry);
+			    ConstMemory const opt_name = option->getName ();
+			    MConfig::Value * const opt_val = option->getValue ();
+			    if (equal (opt_name, "name")) {
+				if (opt_val) {
+				    stream_name = opt_val->mem();
+				    got_stream_name = true;
+				}
+			    } else
+			    if (equal (opt_name, "chain")) {
+				if (opt_val) {
+				    chain_spec = opt_val->mem();
+				    got_chain_spec = true;
+				}
+			    } else
+			    if (equal (opt_name, "record_path")) {
+				if (opt_val) {
+				    record_path = opt_val->mem();
+				    got_record_path = true;
+				}
+			    } else {
+				logW_ (_func, "Unknown chain option (\"chains\" section): ", opt_name);
+			    }
+			}
+		    }
+
+		    if (!got_stream_name) {
+			logE_ (_func, "Stream name not specified (\"chains\" section)");
+			continue;
+		    }
+
+		    if (!got_chain_spec) {
+			logE_ (_func, "No chain specification for stream "
+			       "\"", stream_name, "\" (\"chains\" section)");
+			continue;
+		    }
+
+		    createStream (stream_name,
+				  chain_spec,
+				  VideoStream::VideoCodecId::Unknown,
+				  true /* chain */,
+				  got_record_path /* recording */,
+				  record_path);
 		}
 	    }
 	} else {
@@ -1069,9 +1165,6 @@ MomentGstModule::doAudioData (GstBuffer * const buffer,
     video_stream->fireAudioMessage (&msg);
 
     self->page_pool->msgUnref (page_list.first);
-
-    // TEST
-    MomentServer::getInstance()->getServerApp()->getActivePollGroup()->trigger();
 }
 
 gboolean
@@ -1340,9 +1433,6 @@ MomentGstModule::doVideoData (GstBuffer * const buffer,
     video_stream->fireVideoMessage (&msg);
 
     self->page_pool->msgUnref (page_list.first);
-
-    // TEST
-    MomentServer::getInstance()->getServerApp()->getActivePollGroup()->trigger();
 }
 
 gboolean
@@ -1455,6 +1545,9 @@ MomentGstModule::~MomentGstModule ()
 	Stream * const stream = stream_list.iter_next (iter);
 	stream->stream_mutex.lock ();
 	closeVideoStream (stream);
+	// TODO releaseVideoStream() to release stream's resources permanently,
+	// including thread context. In contrast, closeVideoStream() allows
+	// restarting the stream.
 	stream->stream_mutex.unlock ();
 	stream->unref ();
     }
