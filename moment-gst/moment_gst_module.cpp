@@ -109,6 +109,8 @@ MomentGstModule::noVideoTimerTick (void * const _stream)
     Time const time = getTime ();
 
     stream->stream_mutex.lock ();
+//    logD_ (_func, "time: 0x", fmt_hex, time, ", last_frame_time: 0x", stream->last_frame_time);
+
     if (time > stream->last_frame_time &&
 	time - stream->last_frame_time >= 15 /* TODO Config param for the timeout */)
     {
@@ -874,8 +876,13 @@ MomentGstModule::doAudioData (GstBuffer * const buffer,
 
     VideoStream::AudioCodecId audio_codec_id = VideoStream::AudioCodecId::Unknown;
 
+    // TODO Update current time efficiently.
+    updateTime ();
+
     stream->stream_mutex.lock ();
+
     stream->last_frame_time = getTime ();
+//    logD_ (_func, "last_frame_time: 0x", fmt_hex, stream->last_frame_time);
 
     if (stream->prv_audio_timestamp >= GST_BUFFER_TIMESTAMP (buffer)) {
 	logD_ (_func, "backwards timestamp: prv 0x", fmt_hex, stream->prv_audio_timestamp,
@@ -1204,6 +1211,7 @@ MomentGstModule::doVideoData (GstBuffer * const buffer,
     stream->stream_mutex.lock ();
 
     stream->last_frame_time = getTime ();
+//    logD_ (_func, "last_frame_time: 0x", fmt_hex, stream->last_frame_time);
 
     GstBuffer *avc_codec_data_buffer = NULL;
     if (stream->first_video_frame) {
