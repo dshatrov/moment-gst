@@ -18,7 +18,9 @@ INCLUDES = -I$(top_srcdir)
 moment_gst_private_headers =
 
 moment_gst_target_headers =	\
-	moment_gst_module.h
+	moment_gst_module.h	\
+	gst_stream.h		\
+	playlist.h
 
 moment_gst_includedir = $(includedir)/moment-gst-1.0/moment-gst
 moment_gst_include_HEADERS = $(moment_gst_target_headers)
@@ -27,7 +29,9 @@ moment_gstdir = $(libdir)/moment-1.0
 moment_gst_LTLIBRARIES = libmoment-gst-1.0.la
 libmoment_gst_1_0_la_SOURCES =	\
 	moment_gst_module.cpp	\
-	mod_gst.cpp
+	mod_gst.cpp		\
+	gst_stream.cpp		\
+	playlist.cpp
 
 moment_gst_extra_dist =
 

@@ -1,6 +1,6 @@
 AC_INIT([MomentGst], [0.1])
 
-PKG_CHECK_MODULES(THIS, [libmoment-1.0 >= 0.1, gstreamer-0.10])
+PKG_CHECK_MODULES(THIS, [libmoment-1.0 >= 0.1, gstreamer-0.10, libxml-2.0 >= 2.0])
 AC_SUBST(THIS_CFLAGS)
 AC_SUBST(THIS_LIBS)
 
