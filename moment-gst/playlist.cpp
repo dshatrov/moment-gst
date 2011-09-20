@@ -347,7 +347,8 @@ static Result parseTime (xmlChar * const mt_nonnull time_str,
 
 	int j;
 	for (j = 0; j < 3; ++j) {
-//	    logD_ (_func, "--- parsing: ", ConstMemory ((Byte const *) str, strlen ((char const *) str)));
+	    while (*str == ' ')
+		++str;
 
 	    if (!strToUint32 (str, &num [j], &str, 10 /* base */)) {
 		if (j > 0) {
@@ -481,7 +482,6 @@ static Result parseTime (xmlChar * const mt_nonnull time_str,
 	    t.tm_isdst = -1 /* auto-detect DST */;
 
 	    time_t const res_time = mktime (&t);
-	    logD_ (_func, "mktime(): ", res_time);
 	    if (res_time == (time_t) -1) {
 		logE_ (_func, "Couldn't convert date/time to unixtime: ",
 		       ConstMemory ((Byte const *) time_str, strlen ((char const *) time_str)));
@@ -500,8 +500,59 @@ static Result parseTime (xmlChar * const mt_nonnull time_str,
 static Result parseDuration (ConstMemory  mem,
 			     Time * const mt_nonnull ret_duration)
 {
-    // TODO
-    *ret_duration = (Time) -1;
+    Size offs = 0;
+
+    Uint32 num [3] = { 0, 0, 0 };
+
+    int i;
+    for (i = 0; i < 3; ++i) {
+	while (offs < mem.len() && mem.mem() [offs] == ' ')
+	    ++offs;
+
+	Byte const *endptr;
+	if (!strToUint32 (mem.region (offs), &num [i], &endptr, 10 /* base */)) {
+	    logE_ (_func, "Couldn't parse duration \"", mem, "\"");
+	    return Result::Failure;
+	}
+
+	offs = endptr - mem.mem();
+
+	while (offs < mem.len() && mem.mem() [offs] == ' ')
+	    ++offs;
+
+	if (i < 2) {
+	    if (mem.mem() [offs] != ':')
+		break;
+
+	    ++offs;
+	}
+    }
+
+    while (offs < mem.len() && mem.mem() [offs] == ' ')
+	++offs;
+
+    if (offs != mem.len()) {
+	logE_ (_func, "Couldn't parse duration \"", mem, "\"");
+	return Result::Failure;
+    }
+
+    switch (i) {
+	case 0:
+	    *ret_duration = (Time) num [0];
+	    break;
+	case 1:
+	    *ret_duration = ((Time) num [0] * 60) + ((Time) num [1]);
+	    break;
+	case 2:
+	    unreachable ();
+	    break;
+	case 3:
+	    *ret_duration = ((Time) num [0] * 3600) + ((Time) num [1] * 60) + ((Time) num [2]);
+	    break;
+	default:
+	    unreachable ();
+    }
+
     return Result::Success;
 }
 
