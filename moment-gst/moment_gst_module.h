@@ -21,104 +21,50 @@
 #define __MOMENT_GST__MOMENT_GST_MODULE__H__
 
 
-#include <libmary/types.h>
-#include <gst/gst.h>
-
 #include <moment/libmoment.h>
 
+#include <moment-gst/gst_stream.h>
+#include <moment-gst/playlist.h>
 
-namespace Moment {
+
+namespace MomentGst {
 
 using namespace M;
+using namespace Moment;
 
 class MomentGstModule : public Object
 {
 private:
-  // TODO MT-safety
-
-    class Stream : public IntrusiveListElement<>,
-		   public Object
+    class Playback : public HashEntry<>,
+		     public Object
     {
     public:
-	WeakCodeRef weak_gst_module;
-	MomentGstModule *unsafe_gst_module;
+	mt_const WeakRef<MomentGstModule> weak_module;
+	mt_const Timers *timers;
 
 	mt_const Ref<String> stream_name;
-	mt_const Ref<String> stream_spec;
-	// TODO Unused
-	mt_const VideoStream::VideoCodecId encoder_video_codec;
-	mt_const bool is_chain;
 
-	Timers::TimerKey no_video_timer;
+	mt_const Ref<GstStream> stream;
 
-	Ref<VideoStream> video_stream;
-	MomentServer::VideoStreamKey video_stream_key;
+	mt_mutex (mutex) Playlist playlist;
 
-	ServerThreadContext *recorder_thread_ctx;
-	AvRecorder recorder;
-	bool recording;
-	ConstMemory record_filename;
-	FlvMuxer flv_muxer;
+	mt_mutex (mutex) Playlist::Item *cur_item;
+	mt_mutex (mutex) Time cur_item_start_time;
 
-	GstElement *playbin;
-	GstElement *encoder;
-	gulong audio_probe_id;
-	gulong video_probe_id;
-
-	mt_mutex (stream_mutex) RtmpServer::MetaData metadata;
-
-	mt_mutex (stream_mutex) Time last_frame_time;
-
-	// TODO Unify with 'video_codec'.
-	mt_mutex (stream_mutex) VideoStream::AudioCodecId audio_codec_id;
-	mt_mutex (stream_mutex) Byte audio_hdr;
-
-	mt_mutex (stream_mutex) VideoStream::VideoCodecId video_codec_id;
-	mt_mutex (stream_mutex) Byte video_hdr;
-
-	mt_mutex (stream_mutex) Cond metadata_reported_cond;
-	mt_mutex (stream_mutex) bool metadata_reported;
-
-	mt_mutex (stream_mutex) bool got_video;
-	mt_mutex (stream_mutex) bool got_audio;
-
-	mt_mutex (stream_mutex) bool first_audio_frame;
-	mt_mutex (stream_mutex) Count audio_skip_counter;
-
-	mt_mutex (stream_mutex) bool first_video_frame;
-
-	mt_mutex (stream_mutex) Uint64 prv_audio_timestamp;
-
-	Mutex stream_mutex;
-
-	Stream ()
-	    : encoder_video_codec (VideoStream::VideoCodecId::SorensonH263),
-	      is_chain (false),
-	      no_video_timer (NULL) /* TODO This nullification should be unnecessary */,
-
-	      recorder_thread_ctx (NULL),
-	      recorder (this /* coderef_container */),
-	      recording (false),
-
-	      playbin (NULL),
-	      encoder (NULL),
-	      audio_probe_id (0),
-	      video_probe_id (0),
-	      last_frame_time (0),
-	      audio_codec_id (VideoStream::AudioCodecId::Unknown),
-	      audio_hdr (0xbe /* Speex */),
-	      video_codec_id (VideoStream::VideoCodecId::Unknown),
-	      video_hdr (0x02 /* Sorenson H.263 */),
-	      metadata_reported (false),
-	      got_video (false),
-	      got_audio (false),
-	      first_audio_frame (true),
-	      audio_skip_counter (0),
-	      first_video_frame (true),
-	      prv_audio_timestamp (0)
-	{
-	}
+	mt_mutex (mutex) Timers::TimerKey playback_timer;
     };
+
+    typedef Hash< Playback,
+		  Memory,
+		  MemberExtractor< Playback,
+				   Ref<String>,
+				   &Playback::stream_name,
+				   Memory,
+				   AccessorExtractor< String,
+						      Memory,
+						      &String::mem > >,
+		  MemoryComparator<> >
+	    PlaybackHash;
 
     mt_const MomentServer *moment;
     mt_const Timers *timers;
@@ -130,63 +76,27 @@ private:
     mt_const Uint64 default_height;
     mt_const Uint64 default_bitrate;
 
-    typedef IntrusiveList<Stream> StreamList;
-    StreamList stream_list;
+    mt_mutex (mutex) PlaybackHash playback_hash;
 
-    void createStream (ConstMemory const &stream_name,
-		       ConstMemory const &stream_spec,
-		       VideoStream::VideoCodecId video_codec,
-		       bool               is_chain,
-		       bool               recording,
-		       ConstMemory        record_filename);
+    typedef IntrusiveList<GstStream> StreamList;
+    mt_mutex (mutex) StreamList stream_list;
 
-    mt_mutex (stream->stream_mutex) void restartStream (Stream *stream);
+    void parseSourcesConfigSection ();
+    void parseChainsConfigSection ();
+    void parseStreamsConfigSection ();
 
-    static void noVideoTimerTick (void *_stream);
+    void createPlayback (ConstMemory stream_name,
+			 ConstMemory playlist_filename,
+			 bool        recording,
+			 ConstMemory ecord_filename);
 
-    class CreateVideoStream_Data;
+    static void playbackTimerTick (void *_playback);
 
-    mt_mutex (stream->stream_mutex) void createVideoStream (Stream *stream);
-
-    static gpointer streamThreadFunc (gpointer _data);
-
-    mt_mutex (stream->stream_mutex) void closeVideoStream (Stream *stream);
-
-    Result createPipelineForChainSpec (Stream *stream);
-
-    Result createPipelineForUri (Stream *stream);
-
-    mt_mutex (stream->stream_mutex) Result createPipeline (Stream *stream);
-
-    mt_mutex (stream->stream_mutex) static void reportMetaData (Stream *stream);
-
-    static void doAudioData (GstBuffer *buffer,
-			     Stream    *stream);
-
-    static gboolean audioDataCb (GstPad    * /* pad */,
-				 GstBuffer *buffer,
-				 gpointer   _stream);
-
-    static void handoffAudioDataCb (GstElement * /* element */,
-				    GstBuffer  *buffer,
-				    GstPad     * /* pad */,
-				    gpointer    _stream);
-
-    static void doVideoData (GstBuffer *buffer,
-			     Stream    *stream);
-
-    static gboolean videoDataCb (GstPad    * /* pad */,
-				 GstBuffer *buffer,
-				 gpointer   _stream);
-
-    static void handoffVideoDataCb (GstElement * /* element */,
-				    GstBuffer  *buffer,
-				    GstPad     * /* pad */,
-				    gpointer    _stream);
-
-    static gboolean busCallCb (GstBus     *bus,
-			       GstMessage *msg,
-			       gpointer    _stream);
+    void createStream (ConstMemory stream_name,
+		       ConstMemory stream_spec,
+		       bool        is_chain,
+		       bool        recording,
+		       ConstMemory record_filename);
 
 public:
     Result init (MomentServer *moment);

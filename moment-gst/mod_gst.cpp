@@ -21,8 +21,9 @@
 
 
 using namespace M;
+using namespace Moment;
 
-namespace Moment {
+namespace MomentGst {
 
 namespace {
 
@@ -86,19 +87,19 @@ void momentGstUnload ()
 
 } // namespace {}
 
-} // namespace Moment
+} // namespace MomentGst
 
 
 namespace M {
 
 void libMary_moduleInit ()
 {
-    Moment::momentGstInit ();
+    MomentGst::momentGstInit ();
 }
 
 void libMary_moduleUnload ()
 {
-    Moment::momentGstUnload ();
+    MomentGst::momentGstUnload ();
 }
 
 }
