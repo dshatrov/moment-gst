@@ -92,20 +92,30 @@ MomentGstModule::createPlayback (ConstMemory const stream_name,
 void
 MomentGstModule::playbackTimerTick (void * const _playback)
 {
-    logD_ (_func, "playback 0x", fmt_hex, (UintPtr) _playback);
-
     Playback * const playback = static_cast <Playback*> (_playback);
+
+    logD_ (_func, "playback 0x", fmt_hex, (UintPtr) _playback, ", cur_item 0x", (UintPtr) playback->cur_item);
 
     playback->mutex.lock ();
     playback->timers->deleteTimer (playback->playback_timer);
 
     playback->stream->endVideoStream ();
 
+#if 0
+    // TEST
+    if (playback->cur_item) {
+	playback->mutex.unlock ();
+	return;
+    }
+#endif
+
+#if 0
     Ref<MomentGstModule> const module = playback->weak_module.getRef();
     if (!module) {
 	playback->mutex.unlock ();
 	return;
     }
+#endif
 
     Time start_rel;
     Time seek;
@@ -126,6 +136,8 @@ MomentGstModule::playbackTimerTick (void * const _playback)
 	    return;
 	}
 
+	playback->cur_item = NULL;
+
 	logD_ (_func, "Playlist end");
 
 	// FIXME 0 timeout causes busy-looping
@@ -137,6 +149,8 @@ MomentGstModule::playbackTimerTick (void * const _playback)
 	playback->mutex.unlock ();
 	return;
     }
+
+    playback->cur_item = item;
 
     logD_ (_func, "chain_spec: ", item->chain_spec);
     logD_ (_func, "start_rel: ", start_rel, ", seek: ", seek, ", "
@@ -152,10 +166,10 @@ MomentGstModule::playbackTimerTick (void * const _playback)
 
     // TODO Minimum duration limit
     if (item->chain_spec && !item->chain_spec.isNull()) {
-	playback->stream->beginVideoStream (item->chain_spec->mem(), true /* is_chain */);
+	playback->stream->beginVideoStream (item->chain_spec->mem(), true /* is_chain */, seek);
     } else
     if (item->uri && !item->uri.isNull()) {
-	playback->stream->beginVideoStream (item->uri->mem(), false /* is_chain */);
+	playback->stream->beginVideoStream (item->uri->mem(), false /* is_chain */, seek);
     } else {
 	logW_ (_func, "No chain spec and no uri for playlist item");
     }

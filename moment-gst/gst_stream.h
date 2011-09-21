@@ -36,6 +36,116 @@ class GstStream : public IntrusiveListElement<>,
 		  public Object
 {
 private:
+    // StreamControl object helps to resolve deadlocks caused by mixing
+    // GstStream::mutex and internal gstreamer locks.
+    //
+    // A pseudo-code example ('mnt' - GstStream::mutex, 'gst' - gstreamer locks,
+    // 'ctl' - StreamControl::mutex) follows.
+    //
+    // Without StreamControl, synchronization looked like this:
+    //
+    //     A method of GstStream makes a gstreamer call:
+    //         mnt { gst{} }
+    //
+    //     A callback called by gstreamer accesses GstStream data:
+    //         gst { mnt{} }
+    //
+    // The above example involves lock order inversion, which means deadlocks.
+    // With StreamControl, callbacks called by gstreamer access StreamControl
+    // data, and not GstStream data, which resolves the deadlock:
+    //
+    //     A method of GstStream makes a gstreamer call:
+    //         mnt { ctl{} gst{} }
+    //
+    //     A callback called by gstreamer accesses GstStream data:
+    //         gst { ctl{} }
+    //
+    class StreamControl : public Referenced
+    {
+    public:
+	mt_const PagePool *page_pool;
+	mt_const GstElement *playbin;
+	mt_const VideoStream *video_stream;
+
+	mt_const bool send_metadata;
+
+	mt_mutex (ctl_mutex)
+	mt_begin
+
+	  Time initial_seek;
+	  bool initial_seek_pending;
+
+	  RtmpServer::MetaData metadata;
+
+	  Cond metadata_reported_cond;
+	  bool metadata_reported;
+
+	  Time last_frame_time;
+
+	  // TODO Unify with 'video_codec'.
+	  VideoStream::AudioCodecId audio_codec_id;
+	  Byte audio_hdr;
+
+	  VideoStream::VideoCodecId video_codec_id;
+	  Byte video_hdr;
+
+	  bool got_video;
+	  bool got_audio;
+
+	  bool first_audio_frame;
+	  Count audio_skip_counter;
+
+	  bool first_video_frame;
+
+	  Uint64 prv_audio_timestamp;
+
+	mt_end
+
+	Mutex ctl_mutex;
+
+	mt_mutex (ctl_mutex) void reportMetaData ();
+
+	mt_mutex (ctl_mutex) void doAudioData (GstBuffer *buffer);
+
+	static gboolean audioDataCb (GstPad    * /* pad */,
+				     GstBuffer *buffer,
+				     gpointer   _ctl);
+
+	static void handoffAudioDataCb (GstElement * /* element */,
+					GstBuffer  *buffer,
+					GstPad     * /* pad */,
+					gpointer    _ctl);
+
+	mt_mutex (ctl_mutex) void doVideoData (GstBuffer *buffer);
+
+	static gboolean videoDataCb (GstPad    * /* pad */,
+				     GstBuffer *buffer,
+				     gpointer   _ctl);
+
+	static void handoffVideoDataCb (GstElement * /* element */,
+					GstBuffer  *buffer,
+					GstPad     * /* pad */,
+					gpointer    _ctl);
+
+#if 0
+    // Unused
+	static gboolean busCallCb (GstBus     *bus,
+				   GstMessage *msg,
+				   gpointer    _ctl);
+#endif
+
+	static GstBusSyncReply busSyncHandler (GstBus     *bus,
+					       GstMessage *msg,
+					       gpointer    _ctl);
+
+	void init (PagePool    *page_pool,
+		   GstElement  *playbin,
+		   VideoStream *video_stream,
+		   bool         send_metadata);
+
+	StreamControl ();
+    };
+
     mt_const MomentServer *moment;
     mt_const Timers *timers;
     mt_const PagePool *page_pool;
@@ -72,7 +182,6 @@ private:
 
   // Gstreamer state
 
-//#error Synchronize access to 'playbin' and other fields
     mt_mutex (mutex) GstElement *playbin;
     mt_mutex (mutex) GstElement *encoder;
     mt_mutex (mutex) gulong audio_probe_id;
@@ -83,92 +192,34 @@ private:
     mt_mutex (mutex) Ref<VideoStream> video_stream;
     mt_mutex (mutex) MomentServer::VideoStreamKey video_stream_key;
 
+    mt_mutex (mutex) Ref<StreamControl> stream_ctl;
+
     mt_mutex (mutex) Timers::TimerKey no_video_timer;
-    mt_mutex (mutex) Time last_frame_time;
-
-    // TODO Unify with 'video_codec'.
-    mt_mutex (mutex) VideoStream::AudioCodecId audio_codec_id;
-    mt_mutex (mutex) Byte audio_hdr;
-
-    mt_mutex (mutex) VideoStream::VideoCodecId video_codec_id;
-    mt_mutex (mutex) Byte video_hdr;
-
-    mt_mutex (mutex) RtmpServer::MetaData metadata;
-
-    mt_mutex (mutex) Cond metadata_reported_cond;
-    mt_mutex (mutex) bool metadata_reported;
-
-    mt_mutex (mutex) bool got_video;
-    mt_mutex (mutex) bool got_audio;
-
-    mt_mutex (mutex) bool first_audio_frame;
-    mt_mutex (mutex) Count audio_skip_counter;
-
-    mt_mutex (mutex) bool first_video_frame;
-
-    mt_mutex (mutex) Uint64 prv_audio_timestamp;
+    mt_mutex (mutex) Time initial_seek;
 
     // Separate state mutex to decouple from synchronization of deletion
     // subscriptions.
     StateMutex mutex;
 
-#if 0
-    Ref<Stream> createStream (ConstMemory const &stream_name,
-			      ConstMemory const &stream_spec,
-			      bool               is_chain,
-			      bool               recording,
-			      ConstMemory        record_filename);
-#endif
-
     class CreateVideoStream_Data;
 
-    mt_mutex (mutex) void createVideoStream ();
+    mt_mutex (mutex) void createVideoStream (Time initial_seek = 0);
 
     static gpointer streamThreadFunc (gpointer _self);
 
     mt_mutex (mutex) void doCloseVideoStream ();
-
     mt_mutex (mutex) void restartStream ();
 
     static void noVideoTimerTick (void *_self);
 
-    Result createPipelineForChainSpec ();
-
-    Result createPipelineForUri ();
-
+    mt_mutex (mutex) Result createPipelineForChainSpec ();
+    mt_mutex (mutex) Result createPipelineForUri ();
     mt_mutex (mutex) Result createPipeline ();
-
-    mt_mutex (mutex) void reportMetaData ();
-
-    void doAudioData (GstBuffer *buffer);
-
-    static gboolean audioDataCb (GstPad    * /* pad */,
-				 GstBuffer *buffer,
-				 gpointer   _self);
-
-    static void handoffAudioDataCb (GstElement * /* element */,
-				    GstBuffer  *buffer,
-				    GstPad     * /* pad */,
-				    gpointer    _self);
-
-    void doVideoData (GstBuffer *buffer);
-
-    static gboolean videoDataCb (GstPad    * /* pad */,
-				 GstBuffer *buffer,
-				 gpointer   _self);
-
-    static void handoffVideoDataCb (GstElement * /* element */,
-				    GstBuffer  *buffer,
-				    GstPad     * /* pad */,
-				    gpointer    _self);
-
-    static gboolean busCallCb (GstBus     *bus,
-			       GstMessage *msg,
-			       gpointer    _self);
 
 public:
     void beginVideoStream (ConstMemory stream_spec,
-			   bool        is_chain);
+			   bool        is_chain,
+			   Time        seek = 0);
 
     void endVideoStream ();
 
