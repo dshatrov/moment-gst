@@ -48,11 +48,17 @@ Playlist::getNextItem (Item   * const prv_item,
     for (;;) {
 	if (item)
 	    item = ItemList::getNext (item);
-	else
+	else {
+	    logD_ (_func, "First item");
 	    item = item_list.getFirst();
+	}
 
-	if (!item)
+	if (!item) {
+	    logD_ (_func, "No next item");
 	    break;
+	}
+
+	logD_ (_func, "item: 0x", fmt_hex, (UintPtr) item);
 
 	logD_ (_func, "start_time: ", item->start_time, ", "
 	       "start_immediate: ", item->start_immediate ? "true" : "false", ", "
@@ -111,6 +117,7 @@ Playlist::getNextItem (Item   * const prv_item,
 	}
 
 	Int64 const start_rel = (Int64) item->start_time - ((Int64) cur_time + time_offset);
+	logD_ (_func, "start_rel: ", start_rel);
 	if (start_rel >= 0) {
 	    *ret_start_rel = (Time) start_rel;
 	    *ret_seek = 0;
@@ -177,6 +184,8 @@ Playlist::getNextItem (Item   * const prv_item,
     }
 
   // End of playlist.
+
+    logD_ (_func, "Returning NULL");
 
     *ret_start_rel = 0;
     *ret_seek = 0;
@@ -298,6 +307,7 @@ Playlist::parseItem (xmlDocPtr   doc,
     if (path.len())
 	item->uri = makeString ("file://", path);
 
+    logD_ (_func, "Parsing attributes");
     parseItemAttributes (item_node, item);
 }
 
@@ -600,6 +610,7 @@ Playlist::parseItemAttributes (xmlNodePtr      node,
 	if (duration_val) {
 	    ConstMemory const duration_mem ((Byte const *) duration_val, strlen ((char const *) duration_val));
 	    if (equal (duration_mem, "full")) {
+		logD_ (_func, "duration=\"full\"");
 		item->duration_default = false;
 		item->duration_full = true;
 		item->duration = (Time) -1;
@@ -614,6 +625,7 @@ Playlist::parseItemAttributes (xmlNodePtr      node,
 		}
 	    }
 	} else {
+	    logD_ (_func, "No duration");
 	    item->duration_default = true;
 	    item->duration_full = false;
 	    item->duration = (Time) -1;
