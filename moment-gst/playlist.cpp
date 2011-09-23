@@ -202,6 +202,7 @@ Playlist::clear ()
 	Item * const item = item_list.iter_next (iter);
 	delete item;
     }
+    item_list.clear ();
 }
 
 static xmlNodePtr firstXmlElementNode (xmlNodePtr node)
