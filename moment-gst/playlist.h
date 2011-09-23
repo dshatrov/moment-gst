@@ -48,6 +48,8 @@ public:
 	bool duration_full;
 	bool duration_default;
 
+	Time seek;
+
 	Ref<String> chain_spec;
 	Ref<String> uri;
 
@@ -62,6 +64,8 @@ public:
 	    duration = 0;
 	    duration_full = false;
 	    duration_default = true;
+
+	    seek = 0;
 	}
 
 	Item ()

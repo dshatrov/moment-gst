@@ -72,7 +72,7 @@ Playlist::getNextItem (Item   * const prv_item,
 
 	if (item->start_immediate) {
 	    *ret_start_rel = 0;
-	    *ret_seek = 0;
+	    *ret_seek = item->seek;
 
 	    if (item->duration_full) {
 		*ret_duration = (Time) -1;
@@ -120,10 +120,10 @@ Playlist::getNextItem (Item   * const prv_item,
 	logD_ (_func, "start_rel: ", start_rel);
 	if (start_rel >= 0) {
 	    *ret_start_rel = (Time) start_rel;
-	    *ret_seek = 0;
+	    *ret_seek = item->seek;
 	} else {
 	    *ret_start_rel = 0;
-	    *ret_seek = (Time) -start_rel;
+	    *ret_seek = (Time) -start_rel + item->seek;
 	}
 
 	if (item->duration_full) {
@@ -630,6 +630,21 @@ Playlist::parseItemAttributes (xmlNodePtr      node,
 	    item->duration_default = true;
 	    item->duration_full = false;
 	    item->duration = (Time) -1;
+	}
+    }
+
+    {
+	item->seek = 0;
+
+	xmlChar const * seek_val = xmlGetProp (node, (xmlChar const *) "seek");
+	if (seek_val) {
+	    ConstMemory const seek_mem ((Byte const *) seek_val, strlen ((char const *) seek_val));
+	    if (!parseDuration (seek_mem, &item->seek)) {
+		item->seek = 0;
+		logE_ (_func, "Couldn't parse seek: ", seek_mem);
+	    }
+	} else {
+	    item->seek = 0;
 	}
     }
 
