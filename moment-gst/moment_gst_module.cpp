@@ -27,6 +27,42 @@
 #include <moment-gst/moment_gst_module.h>
 
 
+// TODO These header macros are the same as in rtmpt_server.cpp
+#define MOMENT_GST__HEADERS_DATE \
+	Byte date_buf [timeToString_BufSize]; \
+	Size const date_len = timeToString (Memory::forObject (date_buf), getUnixtime());
+
+#define MOMENT_GST__COMMON_HEADERS \
+	"Server: Moment/1.0\r\n" \
+	"Date: ", ConstMemory (date_buf, date_len), "\r\n" \
+	"Connection: Keep-Alive\r\n" \
+	"Cache-Control: no-cache\r\n"
+
+#define MOMENT_GST__OK_HEADERS(mime_type, content_length) \
+	"HTTP/1.1 200 OK\r\n" \
+	MOMENT_GST__COMMON_HEADERS \
+	"Content-Type: ", (mime_type), "\r\n" \
+	"Content-Length: ", (content_length), "\r\n"
+
+#define MOMENT_GST__404_HEADERS(content_length) \
+	"HTTP/1.1 404 Not found\r\n" \
+	MOMENT_GST__COMMON_HEADERS \
+	"Content-Type: text/plain\r\n" \
+	"Content-Length: ", (content_length), "\r\n"
+
+#define MOMENT_GST__400_HEADERS(content_length) \
+	"HTTP/1.1 400 Bad Request\r\n" \
+	MOMENT_GST__COMMON_HEADERS \
+	"Content-Type: text/plain\r\n" \
+	"Content-Length: ", (content_length), "\r\n"
+
+#define MOMENT_GST__500_HEADERS(content_length) \
+	"HTTP/1.1 500 Internal Server Error\r\n" \
+	MOMENT_GST__COMMON_HEADERS \
+	"Content-Type: text/plain\r\n" \
+	"Content-Length: ", (content_length), "\r\n"
+
+
 using namespace M;
 using namespace Moment;
 
@@ -42,6 +78,7 @@ MomentGstModule::createPlayback (ConstMemory const stream_name,
     playback->weak_module = this;
 
     playback->stream_name = grab (new String (stream_name));
+    playback->playlist_filename = grab (new String (playlist_filename));
     playback->cur_item = NULL;
     playback->cur_stream_ticket = NULL;
     playback->cur_item_start_time = 0;
@@ -59,12 +96,14 @@ MomentGstModule::createPlayback (ConstMemory const stream_name,
 
     playback->timers = timers;
 
+    mutex.lock ();
+
     {
 	Ref<GstStream> const stream = grab (new GstStream);
 
-	mutex.lock ();
+//	mutex.lock ();
 	stream_list.append (stream);
-	mutex.unlock ();
+//	mutex.unlock ();
 	stream->ref();
 
 	stream->init (moment,
@@ -85,6 +124,8 @@ MomentGstModule::createPlayback (ConstMemory const stream_name,
 	playback->stream = stream;
     }
 
+    playback_hash.add (playback);
+
     playback->mutex.lock ();
     playback->playback_timer = timers->addTimer (playbackTimerTick,
 						 playback /* cb_data */,
@@ -92,6 +133,8 @@ MomentGstModule::createPlayback (ConstMemory const stream_name,
 						 0 /* time_seconds */,
 						 false /* periodical */);
     playback->mutex.unlock ();
+
+    mutex.unlock ();
 }
 
 mt_mutex (playback->mutex) void
@@ -194,9 +237,47 @@ MomentGstModule::playbackTimerTick (void * const _playback)
     logD_ (_func, "playback 0x", fmt_hex, (UintPtr) _playback, ", cur_item 0x", (UintPtr) playback->cur_item);
 
     playback->mutex.lock ();
-// TODO FIXME Protect against concurrent Eos and playbackTimerTick
     advancePlayback (playback);
     playback->mutex.unlock ();
+}
+
+Result
+MomentGstModule::updatePlaylist (ConstMemory   const playlist_name,
+				 bool          const keep_cur_item,
+				 Ref<String> * const mt_nonnull ret_err_msg)
+{
+    logD_ (_func, "playlist_name: ", playlist_name);
+
+    mutex.lock ();
+    Playback * const playback = playback_hash.lookup (playlist_name);
+    if (!playback) {
+	mutex.unlock ();
+	Ref<String> const err_msg = makeString ("Unknown playlist: ", playlist_name);
+	logE_ (_func, err_msg);
+	*ret_err_msg = err_msg;
+	return Result::Failure;
+    }
+    mutex.unlock ();
+
+    playback->mutex.lock ();
+    playback->playlist.clear ();
+    Ref<String> err_msg;
+    if (!playback->playlist.parsePlaylistFile (playback->playlist_filename->mem(), &err_msg)) {
+	mutex.unlock ();
+	logE_ (_func, "parsePlaylistFile() failed: ", err_msg);
+	*ret_err_msg = makeString ("Playlist parsing error: ", err_msg->mem());
+	return Result::Failure;
+    }
+
+    playback->cur_item = NULL;
+    playback->cur_stream_ticket = NULL;
+
+    if (!keep_cur_item)
+	advancePlayback (playback);
+
+    playback->mutex.unlock ();
+
+    return Result::Success;
 }
 
 void
@@ -249,10 +330,66 @@ MomentGstModule::streamEos (void * const stream_ticket,
     Playback * const playback = static_cast <Playback*> (_playback);
 
     playback->mutex.lock ();
-    if ((void*) playback->cur_stream_ticket == stream_ticket) {
+    if (!playback->cur_stream_ticket ||
+	(void*) playback->cur_stream_ticket == stream_ticket)
+    {
 	advancePlayback (playback);
     }
     playback->mutex.unlock ();
+}
+
+HttpService::HttpHandler MomentGstModule::admin_http_handler = {
+    adminHttpRequest,
+    NULL /* httpMessageBody */
+};
+
+Result
+MomentGstModule::adminHttpRequest (HttpRequest  * const mt_nonnull req,
+				   Sender       * const mt_nonnull conn_sender,
+				   Memory const &msg_body,
+				   void        ** const mt_nonnull ret_msg_data,
+				   void         * const _self)
+{
+    MomentGstModule * const self = static_cast <MomentGstModule*> (_self);
+
+    MOMENT_GST__HEADERS_DATE;
+
+    if (req->getNumPathElems() == 3
+	&& (equal (req->getPath (1), "update_playlist") ||
+	    equal (req->getPath (1), "update_playlist_now")))
+    {
+	ConstMemory const playlist_name = req->getPath (2);
+
+	bool const keep_cur_item = equal (req->getPath (1), "update_playlist");
+	Ref<String> err_msg;
+	if (!self->updatePlaylist (playlist_name, keep_cur_item, &err_msg)) {
+	    conn_sender->send (self->page_pool,
+			       true /* do_flush */,
+			       MOMENT_GST__500_HEADERS (err_msg->mem().len()),
+			       "\r\n",
+			       err_msg->mem());
+	    goto _return;
+	}
+
+	ConstMemory const reply_body = "OK";
+	conn_sender->send (self->page_pool,
+			   true /* do_flush */,
+			   MOMENT_GST__OK_HEADERS ("text/plain", reply_body.len()),
+			   "\r\n",
+			   reply_body);
+    } else {
+	logE_ (_func, "Unknown admin HTTP request: ", req->getFullPath());
+
+	ConstMemory const reply_body = "Unknown command";
+	conn_sender->send (self->page_pool,
+			   true /* do_flush */,
+			   MOMENT_GST__404_HEADERS (reply_body.len()),
+			   "\r\n",
+			   reply_body);
+    }
+
+_return:
+    return Result::Success;
 }
 
 // TODO Always succeeds currently.
@@ -308,6 +445,11 @@ MomentGstModule::init (MomentServer * const moment)
 	    return Result::Failure;
 	}
     }
+
+    moment->getAdminHttpService()->addHttpHandler (
+	    Cb<HttpService::HttpHandler> (
+		    &admin_http_handler, this /* cb_data */, NULL /* coderef_container */),
+	    "moment_admin");
 
     parseSourcesConfigSection ();
     parseChainsConfigSection ();
@@ -596,6 +738,8 @@ MomentGstModule::~MomentGstModule ()
 	stream->release ();
 	stream->unref ();
     }
+
+    // TODO Iterate playback_hash and release playbacks
 }
 
 } // namespace Moment

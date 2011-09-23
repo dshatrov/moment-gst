@@ -39,6 +39,7 @@ private:
     {
     };
 
+    // TODO Playback should be a separate objects, not a nested class.
     class Playback : public HashEntry<>,
 		     public Object
     {
@@ -47,12 +48,14 @@ private:
 	mt_const Timers *timers;
 
 	mt_const Ref<String> stream_name;
+	mt_const Ref<String> playlist_filename;
 
 	mt_const Ref<GstStream> stream;
 
 	mt_mutex (mutex) Playlist playlist;
 
 	mt_mutex (mutex) Playlist::Item *cur_item;
+	// TODO Unused
 	mt_mutex (mutex) Time cur_item_start_time;
 
 	mt_mutex (mutex) Ref<StreamTicket> cur_stream_ticket;
@@ -100,6 +103,10 @@ private:
 
     static void playbackTimerTick (void *_playback);
 
+    Result updatePlaylist (ConstMemory  playlist_name,
+			   bool         keep_cur_item,
+			   Ref<String> * mt_nonnull ret_err_msg);
+
     void createStream (ConstMemory stream_name,
 		       ConstMemory stream_spec,
 		       bool        is_chain,
@@ -116,6 +123,19 @@ private:
 
       static void streamEos (void *stream_ticket,
 			     void *_playback);
+
+    mt_end
+
+    mt_iface (HttpService::Frontend)
+    mt_begin
+
+      static HttpService::HttpHandler admin_http_handler;
+
+      static Result adminHttpRequest (HttpRequest  * mt_nonnull req,
+				      Sender       * mt_nonnull conn_sender,
+				      Memory const &msg_body,
+				      void        ** mt_nonnull ret_msg_data,
+				      void         *_self);
 
     mt_end
 
