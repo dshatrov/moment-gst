@@ -35,6 +35,17 @@ using namespace Moment;
 class GstStream : public IntrusiveListElement<>,
 		  public Object
 {
+public:
+    struct Frontend
+    {
+	void (*error) (void *stream_ticket,
+		       void *cb_data);
+
+	// End of stream.
+	void (*eos) (void *stream_ticket,
+		     void *cb_data);
+    };
+
 private:
     // StreamControl object helps to resolve deadlocks caused by mixing
     // GstStream::mutex and internal gstreamer locks.
@@ -63,14 +74,19 @@ private:
     class StreamControl : public Referenced
     {
     public:
+	mt_const GstStream *gst_stream;
 	mt_const PagePool *page_pool;
-	mt_const GstElement *playbin;
 	mt_const VideoStream *video_stream;
+
+	mt_const VirtRef stream_ticket_ref;
+	mt_const void *stream_ticket;
 
 	mt_const bool send_metadata;
 
 	mt_mutex (ctl_mutex)
 	mt_begin
+
+	  GstElement *playbin;
 
 	  Time initial_seek;
 	  bool initial_seek_pending;
@@ -98,6 +114,9 @@ private:
 	  bool first_video_frame;
 
 	  Uint64 prv_audio_timestamp;
+
+	  bool error_pending;
+	  bool eos_pending;
 
 	mt_end
 
@@ -138,19 +157,24 @@ private:
 					       GstMessage *msg,
 					       gpointer    _ctl);
 
-	void init (PagePool    *page_pool,
-		   GstElement  *playbin,
+	void init (GstStream   *gst_stream,
+		   PagePool    *page_pool,
 		   VideoStream *video_stream,
 		   bool         send_metadata);
 
 	StreamControl ();
     };
 
+    mt_const Cb<Frontend> frontend;
+
     mt_const MomentServer *moment;
     mt_const Timers *timers;
     mt_const PagePool *page_pool;
 
     mt_const Ref<String> stream_name;
+
+    DeferredProcessor::Registration deferred_reg;
+    DeferredProcessor::Task deferred_task;
 
     mt_mutex (mutex) bool valid;
 
@@ -195,20 +219,23 @@ private:
     mt_mutex (mutex) Ref<StreamControl> stream_ctl;
 
     mt_mutex (mutex) Timers::TimerKey no_video_timer;
-    mt_mutex (mutex) Time initial_seek;
 
     // Separate state mutex to decouple from synchronization of deletion
     // subscriptions.
     StateMutex mutex;
 
+    static bool deferredTask (void *_self);
+
     class CreateVideoStream_Data;
 
-    mt_mutex (mutex) void createVideoStream (Time initial_seek = 0);
+    mt_mutex (mutex) void createVideoStream (Time            initial_seek,
+					     void           *stream_ticket,
+					     VirtReferenced *stream_ticket_ref);
 
     static gpointer streamThreadFunc (gpointer _self);
 
     mt_mutex (mutex) void doCloseVideoStream ();
-    mt_mutex (mutex) void restartStream ();
+    mt_mutex (mutex) mt_unlocks (stream_ctl->ctl_mutex) void restartStream ();
 
     static void noVideoTimerTick (void *_self);
 
@@ -217,22 +244,30 @@ private:
     mt_mutex (mutex) Result createPipeline ();
 
 public:
-    void beginVideoStream (ConstMemory stream_spec,
-			   bool        is_chain,
-			   Time        seek = 0);
+    void beginVideoStream (ConstMemory     stream_spec,
+			   bool            is_chain,
+			   void           *stream_ticket,
+			   VirtReferenced *stream_ticket_ref,
+			   Time            seek = 0);
 
     void endVideoStream ();
 
-    mt_const void init (MomentServer *moment,
-			ConstMemory   stream_name,
-			bool          recording,
-			ConstMemory   record_filename,
-			bool          send_metadata,
-			Uint64        default_width,
-			Uint64        default_height,
-			Uint64        default_bitrate);
+    mt_const void init (MomentServer      *moment,
+			DeferredProcessor *deferred_processor,
+			ConstMemory        stream_name,
+			bool               recording,
+			ConstMemory        record_filename,
+			bool               send_metadata,
+			Uint64             default_width,
+			Uint64             default_height,
+			Uint64             default_bitrate);
 
     void release ();
+
+    mt_const void setFrontend (CbDesc<Frontend> const &frontend)
+    {
+	this->frontend = frontend;
+    }
 
     GstStream ();
 

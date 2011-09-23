@@ -35,6 +35,10 @@ using namespace Moment;
 class MomentGstModule : public Object
 {
 private:
+    class StreamTicket : public Referenced
+    {
+    };
+
     class Playback : public HashEntry<>,
 		     public Object
     {
@@ -50,6 +54,8 @@ private:
 
 	mt_mutex (mutex) Playlist::Item *cur_item;
 	mt_mutex (mutex) Time cur_item_start_time;
+
+	mt_mutex (mutex) Ref<StreamTicket> cur_stream_ticket;
 
 	mt_mutex (mutex) Timers::TimerKey playback_timer;
     };
@@ -90,6 +96,8 @@ private:
 			 bool        recording,
 			 ConstMemory ecord_filename);
 
+    mt_mutex (playback->mutex) static void advancePlayback (Playback *playback);
+
     static void playbackTimerTick (void *_playback);
 
     void createStream (ConstMemory stream_name,
@@ -97,6 +105,19 @@ private:
 		       bool        is_chain,
 		       bool        recording,
 		       ConstMemory record_filename);
+
+    mt_iface (GstStream::Frontend)
+    mt_begin
+
+      static GstStream::Frontend gst_stream_frontend;
+
+      static void streamError (void *stream_ticket,
+			       void *_playback);
+
+      static void streamEos (void *stream_ticket,
+			     void *_playback);
+
+    mt_end
 
 public:
     Result init (MomentServer *moment);

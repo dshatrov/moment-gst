@@ -43,6 +43,7 @@ MomentGstModule::createPlayback (ConstMemory const stream_name,
 
     playback->stream_name = grab (new String (stream_name));
     playback->cur_item = NULL;
+    playback->cur_stream_ticket = NULL;
     playback->cur_item_start_time = 0;
 
     {
@@ -67,6 +68,7 @@ MomentGstModule::createPlayback (ConstMemory const stream_name,
 	stream->ref();
 
 	stream->init (moment,
+		      moment->getServerApp()->getMainThreadContext()->getDeferredProcessor(),
 		      stream_name,
 		      recording,
 		      record_filename,
@@ -74,6 +76,9 @@ MomentGstModule::createPlayback (ConstMemory const stream_name,
 		      default_width,
 		      default_height,
 		      default_bitrate);
+
+	stream->setFrontend (CbDesc<GstStream::Frontend> (
+		&gst_stream_frontend, playback /* cb_data */, playback /* coderef_container */));
 
 //	stream->beginVideoStream (stream_spec, is_chain);
 
@@ -89,15 +94,13 @@ MomentGstModule::createPlayback (ConstMemory const stream_name,
     playback->mutex.unlock ();
 }
 
-void
-MomentGstModule::playbackTimerTick (void * const _playback)
+mt_mutex (playback->mutex) void
+MomentGstModule::advancePlayback (Playback * const playback)
 {
-    Playback * const playback = static_cast <Playback*> (_playback);
-
-    logD_ (_func, "playback 0x", fmt_hex, (UintPtr) _playback, ", cur_item 0x", (UintPtr) playback->cur_item);
-
-    playback->mutex.lock ();
-    playback->timers->deleteTimer (playback->playback_timer);
+    if (playback->playback_timer) {
+	playback->timers->deleteTimer (playback->playback_timer);
+	playback->playback_timer = NULL;
+    }
 
     playback->stream->endVideoStream ();
 
@@ -131,12 +134,12 @@ MomentGstModule::playbackTimerTick (void * const _playback)
     if (!item) {
 	if (!playback->cur_item) {
 	  // Empty playlist
-	    playback->mutex.unlock ();
 	    logD_ (_func, "Empty playlist");
 	    return;
 	}
 
 	playback->cur_item = NULL;
+	playback->cur_stream_ticket = NULL;
 
 	logD_ (_func, "Playlist end");
 
@@ -146,11 +149,11 @@ MomentGstModule::playbackTimerTick (void * const _playback)
 							       playback /* coderef_container */,
 							       0 /* time_seconds */,
 							       false /* periodical */);
-	playback->mutex.unlock ();
 	return;
     }
 
     playback->cur_item = item;
+    playback->cur_stream_ticket = grab (new StreamTicket);
 
     logD_ (_func, "chain_spec: ", item->chain_spec);
     logD_ (_func, "start_rel: ", start_rel, ", seek: ", seek, ", "
@@ -166,14 +169,33 @@ MomentGstModule::playbackTimerTick (void * const _playback)
 
     // TODO Minimum duration limit
     if (item->chain_spec && !item->chain_spec.isNull()) {
-	playback->stream->beginVideoStream (item->chain_spec->mem(), true /* is_chain */, seek);
+	playback->stream->beginVideoStream (item->chain_spec->mem(),
+					    true /* is_chain */,
+					    playback->cur_stream_ticket /* stream_ticket */,
+					    playback->cur_stream_ticket /* stream_ticket_ref */,
+					    seek);
     } else
     if (item->uri && !item->uri.isNull()) {
-	playback->stream->beginVideoStream (item->uri->mem(), false /* is_chain */, seek);
+	playback->stream->beginVideoStream (item->uri->mem(),
+					    false /* is_chain */,
+					    playback->cur_stream_ticket /* stream_ticket */,
+					    playback->cur_stream_ticket /* stream_ticket_ref */,
+					    seek);
     } else {
 	logW_ (_func, "No chain spec and no uri for playlist item");
     }
+}
 
+void
+MomentGstModule::playbackTimerTick (void * const _playback)
+{
+    Playback * const playback = static_cast <Playback*> (_playback);
+
+    logD_ (_func, "playback 0x", fmt_hex, (UintPtr) _playback, ", cur_item 0x", (UintPtr) playback->cur_item);
+
+    playback->mutex.lock ();
+// TODO FIXME Protect against concurrent Eos and playbackTimerTick
+    advancePlayback (playback);
     playback->mutex.unlock ();
 }
 
@@ -191,6 +213,7 @@ MomentGstModule::createStream (ConstMemory const stream_name,
     mutex.unlock ();
 
     stream->init (moment,
+		  moment->getServerApp()->getMainThreadContext()->getDeferredProcessor(),
 		  stream_name,
 		  recording,
 		  record_filename,
@@ -199,9 +222,37 @@ MomentGstModule::createStream (ConstMemory const stream_name,
 		  default_height,
 		  default_bitrate);
 
-    stream->beginVideoStream (stream_spec, is_chain);
+    stream->beginVideoStream (stream_spec, is_chain, NULL /* stream_ticket */, NULL /* stream_ticket_ref */);
 
     stream->ref();
+}
+
+GstStream::Frontend
+MomentGstModule::gst_stream_frontend = {
+    streamError,
+    streamEos
+};
+
+void
+MomentGstModule::streamError (void * const stream_ticket,
+			      void * const _playback)
+{
+    logD_ (_func, "stream_ticket: 0x", fmt_hex, (UintPtr) stream_ticket);
+}
+
+void
+MomentGstModule::streamEos (void * const stream_ticket,
+			    void * const _playback)
+{
+    logD_ (_func, "stream_ticket: 0x", fmt_hex, (UintPtr) stream_ticket);
+
+    Playback * const playback = static_cast <Playback*> (_playback);
+
+    playback->mutex.lock ();
+    if ((void*) playback->cur_stream_ticket == stream_ticket) {
+	advancePlayback (playback);
+    }
+    playback->mutex.unlock ();
 }
 
 // TODO Always succeeds currently.

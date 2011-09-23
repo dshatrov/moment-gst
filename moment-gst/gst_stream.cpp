@@ -705,59 +705,83 @@ GstStream::StreamControl::busSyncHandler (GstBus     * const /* bus */,
 
     StreamControl * const ctl = static_cast <StreamControl*> (_ctl);
 
+    ctl->ctl_mutex.lock ();
     if (GST_MESSAGE_SRC (msg) == GST_OBJECT (ctl->playbin)) {
 	logD (bus, _func, "PIPELINE MESSAGE: ", gst_message_type_get_name (GST_MESSAGE_TYPE (msg)));
 
-	if (GST_MESSAGE_TYPE (msg) == GST_MESSAGE_STATE_CHANGED) {
-	    GstState new_state,
-		     pending_state;
-	    gst_message_parse_state_changed (msg, NULL, &new_state, &pending_state);
-	    if (pending_state == GST_STATE_VOID_PENDING) {
-		if (new_state == GST_STATE_PAUSED) {
-		    logD (bus, _func, "PIPELINE PAUSED");
-//		    gst_element_set_state (self->playbin, GST_STATE_PLAYING);
-		} else
-		if (new_state == GST_STATE_PLAYING) {
-		    logD (bus, _func, "PIPELINE PLAYING");
+	switch (GST_MESSAGE_TYPE (msg)) {
+	    case GST_MESSAGE_STATE_CHANGED: {
+		GstState new_state,
+			 pending_state;
+		gst_message_parse_state_changed (msg, NULL, &new_state, &pending_state);
+		if (pending_state == GST_STATE_VOID_PENDING) {
+		    if (new_state == GST_STATE_PAUSED) {
+			logD (bus, _func, "PAUSED");
+		    } else
+		    if (new_state == GST_STATE_PLAYING) {
+			logD (bus, _func, "PLAYING");
 
-		    ctl->ctl_mutex.lock ();
-		    logD_ (_func, "Hello, World, from within a lock!");
-		    logD_ (_func, "initial_seek_pending: ", ctl->initial_seek_pending ? "true" : "false");
-		    bool do_seek = false;
-		    Time initial_seek = ctl->initial_seek;
-		    if (ctl->initial_seek_pending) {
-			ctl->initial_seek_pending = false;
-			do_seek = true;
-		    }
-		    ctl->ctl_mutex.unlock ();
-		    logD_ (_func, "Bye-bye, lock!");
-
-		    if (do_seek) {
-			logD_ (_func, "================ SEEKING ================");
-//			if (!gst_element_seek_simple (ctl->playbin, GST_FORMAT_TIME, (GstSeekFlags) (GST_SEEK_FLAG_FLUSH | GST_SEEK_FLAG_KEY_UNIT), (GstClockTime) /*initial_seek*/1200LL * 1000000000LL)) {
-			if (!gst_element_seek_simple (ctl->playbin, GST_FORMAT_TIME, (GstSeekFlags) (GST_SEEK_FLAG_FLUSH | GST_SEEK_FLAG_KEY_UNIT), (GstClockTime) initial_seek * 1000000000LL)) {
-			    logE_ (_func, "Seek failed");
+			bool do_seek = false;
+			Time initial_seek = ctl->initial_seek;
+			if (ctl->initial_seek_pending) {
+			    ctl->initial_seek_pending = false;
+			    do_seek = true;
 			}
-			logD_ (_func, "Initial seek complete");
+			ctl->ctl_mutex.unlock ();
+
+			if (do_seek && initial_seek > 0) {
+			    if (!gst_element_seek_simple (ctl->playbin,
+							  GST_FORMAT_TIME,
+							  (GstSeekFlags) (GST_SEEK_FLAG_FLUSH | GST_SEEK_FLAG_KEY_UNIT),
+							  (GstClockTime) initial_seek * 1000000000LL))
+			    {
+				logE_ (_func, "Seek failed");
+			    }
+			}
+
+			goto _return;
 		    }
 		}
-	    }
+	    } break;
+	    case GST_MESSAGE_EOS: {
+		logD_ (_func, "EOS");
+
+		ctl->eos_pending = true;
+		ctl->ctl_mutex.unlock ();
+
+		ctl->gst_stream->deferred_reg.scheduleTask (&ctl->gst_stream->deferred_task, false /* permanent */);
+		goto _return;
+	    } break;
+	    case GST_MESSAGE_ERROR: {
+		logD_ (_func, "ERROR");
+
+		ctl->error_pending = true;
+		ctl->ctl_mutex.unlock ();
+
+		ctl->gst_stream->deferred_reg.scheduleTask (&ctl->gst_stream->deferred_task, false /* permanent */);
+		goto _return;
+	    } break;
+	    default:
+	      // No-op
+		;
 	}
 
 	logD (bus, _func, "MSG DONE");
     }
+    ctl->ctl_mutex.unlock ();
 
+_return:
     return GST_BUS_PASS;
 }
 
 void
-GstStream::StreamControl::init (PagePool    * const page_pool,
-				GstElement  * const playbin,
+GstStream::StreamControl::init (GstStream   * const gst_stream,
+				PagePool    * const page_pool,
 				VideoStream * const video_stream,
 				bool          const send_metadata)
 {
+    this->gst_stream = gst_stream;
     this->page_pool = page_pool;
-    this->playbin = playbin;
     this->video_stream = video_stream;
     this->send_metadata = send_metadata;
 
@@ -773,7 +797,12 @@ GstStream::StreamControl::init (PagePool    * const page_pool,
 }
 
 GstStream::StreamControl::StreamControl ()
-    : page_pool (NULL),
+    : gst_stream (NULL),
+      page_pool (NULL),
+      video_stream (NULL),
+
+      send_metadata (false),
+
       playbin (NULL),
 
       initial_seek (0),
@@ -797,19 +826,77 @@ GstStream::StreamControl::StreamControl ()
 
       first_video_frame (true),
 
-      prv_audio_timestamp (0)
+      prv_audio_timestamp (0),
+
+      error_pending (false),
+      eos_pending (false)
 {
 }
 
-mt_mutex (mutex) void
-GstStream::createVideoStream (Time const initial_seek)
+bool
+GstStream::deferredTask (void * const _self)
 {
-    this->initial_seek = initial_seek;
+    GstStream * const self = static_cast <GstStream*> (_self);
 
+    logD_ (_func, "this: 0x", fmt_hex, (UintPtr) self);
+
+    self->mutex.lock ();
+
+    if (self->stream_ctl) {
+	bool fire_eos = false;
+	bool fire_error = false;
+	self->stream_ctl->ctl_mutex.lock ();
+	if (self->stream_ctl->eos_pending) {
+	    self->stream_ctl->eos_pending = false;
+	    fire_eos = true;
+	} else
+	if (self->stream_ctl->error_pending) {
+	    self->stream_ctl->error_pending = false;
+	    fire_error = true;
+	}
+
+	VirtRef const stream_ticket_ref = self->stream_ctl->stream_ticket_ref;
+	void * const stream_ticket = self->stream_ctl->stream_ticket;
+	self->stream_ctl->ctl_mutex.unlock ();
+
+	if (fire_eos) {
+	    assert (!fire_error);
+	    if (self->frontend) {
+		logD_ (_func, "firing EOS");
+		self->frontend.call_mutex (self->frontend->eos, self->mutex, stream_ticket);
+		goto _return;
+	    }
+	} else
+	if (fire_error) {
+	    if (self->frontend) {
+		logD_ (_func, "firing ERROR");
+		self->frontend.call_mutex (self->frontend->error, self->mutex, stream_ticket);
+		goto _return;
+	    }
+	}
+    }
+
+_return:
+    self->mutex.unlock ();
+    return false /* Do not reschedule */;
+}
+
+mt_mutex (mutex) void
+GstStream::createVideoStream (Time             const initial_seek,
+			      void           * const stream_ticket,
+			      VirtReferenced * const stream_ticket_ref)
+{
     if (!video_stream) {
 	video_stream = grab (new VideoStream);
 	video_stream_key = moment->addVideoStream (video_stream, stream_name->mem());
     }
+
+    stream_ctl = grab (new StreamControl);
+    stream_ctl->init (this, page_pool, video_stream, send_metadata);
+    stream_ctl->stream_ticket = stream_ticket;
+    stream_ctl->stream_ticket_ref = stream_ticket_ref;
+    stream_ctl->initial_seek = initial_seek;
+    stream_ctl->initial_seek_pending = true;
 
     recorder.stop ();
     recorder.setVideoStream (video_stream);
@@ -925,11 +1012,17 @@ GstStream::doCloseVideoStream ()
     logD_ (_func, "done");
 }
 
-mt_mutex (mutex) void
+mt_mutex (mutex) mt_unlocks (stream_ctl->ctl_mutex) void
 GstStream::restartStream ()
 {
+    assert (stream_ctl);
+    VirtRef const stream_ticket_ref = stream_ctl->stream_ticket_ref;
+    void * const stream_ticket = stream_ctl->stream_ticket;
+    stream_ctl->ctl_mutex.unlock ();
+
     doCloseVideoStream ();
-    createVideoStream ();
+    // TODO FIXME Set correct initial seek
+    createVideoStream (0 /* initial_seek */, stream_ticket, stream_ticket_ref.ptr());
 }
 
 void
@@ -951,9 +1044,8 @@ GstStream::noVideoTimerTick (void * const _self)
 	if (time > self->stream_ctl->last_frame_time &&
 	    time - self->stream_ctl->last_frame_time >= 15 /* TODO Config param for the timeout */)
 	{
-	    self->stream_ctl->ctl_mutex.unlock ();
 	    logD_ (_func, "restarting stream");
-	    self->restartStream ();
+	    mt_unlocks (self->stream_ctl->ctl_mutex) self->restartStream ();
 	} else {
 	    self->stream_ctl->ctl_mutex.unlock ();
 	}
@@ -964,6 +1056,8 @@ GstStream::noVideoTimerTick (void * const _self)
 mt_mutex (mutex) Result
 GstStream::createPipelineForChainSpec ()
 {
+    logD_ (_func, stream_spec);
+
     assert (is_chain);
 
     bool got_audio = false;
@@ -985,6 +1079,17 @@ GstStream::createPipelineForChainSpec ()
 	}
 
 	goto _failure;
+    }
+
+    stream_ctl->ctl_mutex.lock ();
+    stream_ctl->playbin = chain_el;
+    stream_ctl->ctl_mutex.unlock ();
+
+    {
+	GstBus * const bus = gst_element_get_bus (playbin);
+	assert (bus);
+	gst_bus_set_sync_handler (bus, StreamControl::busSyncHandler, stream_ctl);
+	gst_object_unref (bus);
     }
 
     {
@@ -1058,11 +1163,6 @@ GstStream::createPipelineForChainSpec ()
 
     playbin = chain_el;
 
-    stream_ctl = grab (new StreamControl);
-    stream_ctl->init (page_pool, playbin, video_stream, send_metadata);
-    stream_ctl->initial_seek = initial_seek;
-
-// TODO StreamControl initialization
     stream_ctl->ctl_mutex.lock ();
     stream_ctl->got_audio = got_audio;
     stream_ctl->got_video = got_video;
@@ -1109,16 +1209,13 @@ GstStream::createPipelineForUri ()
 	goto _failure;
     }
 
-    stream_ctl = grab (new StreamControl);
-    stream_ctl->init (page_pool, playbin, video_stream, send_metadata);
-    stream_ctl->initial_seek = initial_seek;
+    stream_ctl->ctl_mutex.lock ();
+    stream_ctl->playbin = playbin;
+    stream_ctl->ctl_mutex.unlock ();
 
     {
 	GstBus * const bus = gst_element_get_bus (playbin);
 	assert (bus);
-// Unused
-//	gst_bus_add_watch (bus, busCallCb, this);
-	// TEST
 	gst_bus_set_sync_handler (bus, StreamControl::busSyncHandler, stream_ctl);
 	gst_object_unref (bus);
     }
@@ -1311,51 +1408,9 @@ GstStream::createPipelineForUri ()
 
     g_object_set (G_OBJECT (playbin), "uri", stream_spec->cstr(), NULL);
 
-#if 0
-    logD_ (_func, "Seeking to ", initial_seek);
-    if (!gst_element_seek (playbin,
-			   1.0,
-			   GST_FORMAT_TIME,
-			   (GstSeekFlags) (GST_SEEK_FLAG_FLUSH | GST_SEEK_FLAG_KEY_UNIT),
-			   GST_SEEK_TYPE_SET,
-			   initial_seek * 1000000000 /* nanoseconds */,
-			   GST_SEEK_TYPE_NONE,
-			   GST_CLOCK_TIME_NONE))
-    {
-	logE_ (_func, "Couldn't seek");
-    }
-#endif
-
-#if 0
-    logD_ (_func, "Setting 'initial_seek_pending' to 'true'");
-    initial_seek_pending = true;
-#endif
-
     // TODO got_video, got_auido -?
-    stream_ctl->ctl_mutex.lock ();
-    stream_ctl->initial_seek_pending = true;
-    stream_ctl->ctl_mutex.unlock ();
 
     gst_element_set_state (playbin, GST_STATE_PLAYING);
-
-#if 0
-    // TEST
-    logD_ (_func, "Seeking to ", initial_seek);
-#if 0
-    if (!gst_element_seek (playbin,
-			   1.0,
-			   GST_FORMAT_TIME,
-			   (GstSeekFlags) (GST_SEEK_FLAG_FLUSH | GST_SEEK_FLAG_KEY_UNIT),
-			   GST_SEEK_TYPE_SET,
-			   initial_seek * 1000000000 /* nanoseconds */,
-			   GST_SEEK_TYPE_NONE,
-			   GST_CLOCK_TIME_NONE))
-#endif
-    if (!gst_element_seek_simple (playbin, GST_FORMAT_TIME, (GstSeekFlags) (GST_SEEK_FLAG_FLUSH | GST_SEEK_FLAG_KEY_UNIT), (GstClockTime) /*initial_seek*/1200LL * 1000000000LL))
-    {
-	logE_ (_func, "Couldn't seek");
-    }
-#endif
   }
 
     this->playbin = playbin;
@@ -1390,18 +1445,6 @@ _failure:
 mt_mutex (mutex) Result
 GstStream::createPipeline ()
 {
-#if 0
-// Deprecated
-    audio_codec_id = VideoStream::AudioCodecId::Unknown;
-    first_audio_frame = true;
-    // The first two buffers for Speex are headers. They do appear to contain
-    // audio data and their timestamps look random (very large).
-    audio_skip_counter = 2;
-
-    video_codec_id = VideoStream::VideoCodecId::Unknown;
-    first_video_frame = true;
-#endif
-
     if (is_chain)
 	return createPipelineForChainSpec ();
 
@@ -1411,9 +1454,11 @@ GstStream::createPipeline ()
 // If @is_chain is 'true', then @stream_spec is a chain spec with gst-launch
 // syntax. Otherwise, @stream_spec is an uri for uridecodebin2.
 void
-GstStream::beginVideoStream (ConstMemory const stream_spec,
-			     bool        const is_chain,
-			     Time        const seek)
+GstStream::beginVideoStream (ConstMemory      const stream_spec,
+			     bool             const is_chain,
+			     void           * const stream_ticket,
+			     VirtReferenced * const stream_ticket_ref,
+			     Time             const seek)
 {
     mutex.lock ();
 
@@ -1421,7 +1466,7 @@ GstStream::beginVideoStream (ConstMemory const stream_spec,
     this->is_chain = is_chain;
 
     doCloseVideoStream ();
-    createVideoStream (seek);
+    createVideoStream (seek, stream_ticket, stream_ticket_ref);
 
     mutex.unlock ();
 }
@@ -1435,14 +1480,15 @@ GstStream::endVideoStream ()
 }
 
 void
-GstStream::init (MomentServer * const moment,
-		 ConstMemory    const stream_name,
-		 bool           const recording,
-		 ConstMemory    const record_filename,
-		 bool           const send_metadata,
-		 Uint64         const default_width,
-		 Uint64         const default_height,
-		 Uint64         const default_bitrate)
+GstStream::init (MomentServer      * const moment,
+		 DeferredProcessor * const deferred_processor,
+		 ConstMemory         const stream_name,
+		 bool                const recording,
+		 ConstMemory         const record_filename,
+		 bool                const send_metadata,
+		 Uint64              const default_width,
+		 Uint64              const default_height,
+		 Uint64              const default_bitrate)
 {
     this->moment = moment;
     this->stream_name = grab (new String (stream_name));
@@ -1455,6 +1501,8 @@ GstStream::init (MomentServer * const moment,
 
     this->timers = moment->getServerApp()->getTimers();
     this->page_pool = moment->getPagePool();
+
+    deferred_reg.setDeferredProcessor (deferred_processor);
 
     recorder_thread_ctx = moment->getRecorderThreadPool()->grabThreadContext (record_filename);
     if (!recorder_thread_ctx) {
@@ -1518,15 +1566,19 @@ GstStream::GstStream ()
       audio_probe_id (0),
       video_probe_id (0),
 
-      no_video_timer (NULL),
-      initial_seek (0)
+      no_video_timer (NULL)
 {
     logD_ (_func, "0x", fmt_hex, (UintPtr) this);
+
+    deferred_task.cb = CbDesc<DeferredProcessor::TaskCallback> (
+	    deferredTask, this /* cb_data */, this /* coderef_container */);
 }
 
 GstStream::~GstStream ()
 {
     logD_ (_func, "0x", fmt_hex, (UintPtr) this);
+
+    deferred_reg.release ();
 }
 
 }
