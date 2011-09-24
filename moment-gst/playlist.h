@@ -32,7 +32,8 @@ using namespace Moment;
 mt_unsafe class Playlist
 {
 public:
-    class Item : public IntrusiveListElement<>
+    class Item : public IntrusiveListElement<>,
+		 public HashEntry<>
     {
     public:
 	// Valid if 'start_immediate' is false.
@@ -52,6 +53,8 @@ public:
 
 	Ref<String> chain_spec;
 	Ref<String> uri;
+
+	Ref<String> id;
 
 	void reset ()
 	{
@@ -74,23 +77,22 @@ public:
 	}
     };
 
-#if 0
+    typedef IntrusiveList<Item> ItemList;
+
     typedef Hash< Item,
 		  Memory,
 		  MemberExtractor< Item,
 				   Ref<String>,
-				   &Item::name,
+				   &Item::id,
 				   Memory,
-				   AccessorExtrator< String,
-						     Memory,
-						     &String::mem > >,
+				   AccessorExtractor< String,
+						      Memory,
+						      &String::mem > >,
 		  MemoryComparator<> >
 	    ItemHash;
-#endif
-
-    typedef IntrusiveList<Item> ItemList;
 
     ItemList item_list;
+    ItemHash item_hash;
 
     void doParsePlaylist (xmlDocPtr doc);
 
@@ -110,6 +112,10 @@ public:
 		       Time   * mt_nonnull ret_seek,
 		       Time   * mt_nonnull ret_duration,
 		       bool   * mt_nonnull ret_duration_full);
+
+    Item* getItemById (ConstMemory id);
+
+    Item* getNthItem (Count idx);
 
     void clear ();
 

@@ -194,6 +194,28 @@ Playlist::getNextItem (Item   * const prv_item,
     return NULL;
 }
 
+Playlist::Item*
+Playlist::getItemById (ConstMemory id)
+{
+    return item_hash.lookup (id);
+}
+
+Playlist::Item*
+Playlist::getNthItem (Count const idx)
+{
+    Item *item = NULL;
+
+    ItemList::iter iter (item_list);
+    for (Count i = 0; i < idx; ++i) {
+	if (item_list.iter_done (iter))
+	    return NULL;
+
+	item = item_list.iter_next (iter);
+    }
+
+    return item;
+}
+
 void
 Playlist::clear ()
 {
@@ -203,6 +225,8 @@ Playlist::clear ()
 	delete item;
     }
     item_list.clear ();
+
+    item_hash.clear ();
 }
 
 static xmlNodePtr firstXmlElementNode (xmlNodePtr node)
@@ -238,6 +262,8 @@ Playlist::doParsePlaylist (xmlDocPtr doc)
 	    Playlist::Item * const item = new Playlist::Item;
 	    item_list.append (item);
 	    parseItem (doc, cur_node, item);
+	    if (item->id)
+		item_hash.add (item);
 	} else {
 	    logW_ (_func, "Unknown subnode of <playlist>: ", cur_node_name);
 	}
@@ -508,69 +534,16 @@ static Result parseTime (xmlChar * const mt_nonnull time_str,
     return Result::Success;
 }
 
-static Result parseDuration (ConstMemory  mem,
-			     Time * const mt_nonnull ret_duration)
-{
-    Size offs = 0;
-
-    Uint32 num [3] = { 0, 0, 0 };
-
-    int i;
-    for (i = 0; i < 3; ++i) {
-	while (offs < mem.len() && mem.mem() [offs] == ' ')
-	    ++offs;
-
-	Byte const *endptr;
-	if (!strToUint32 (mem.region (offs), &num [i], &endptr, 10 /* base */)) {
-	    logE_ (_func, "Couldn't parse duration \"", mem, "\"");
-	    return Result::Failure;
-	}
-
-	offs = endptr - mem.mem();
-
-	while (offs < mem.len() && mem.mem() [offs] == ' ')
-	    ++offs;
-
-	if (i < 2) {
-	    if (mem.mem() [offs] != ':')
-		break;
-
-	    ++offs;
-	}
-    }
-
-    while (offs < mem.len() && mem.mem() [offs] == ' ')
-	++offs;
-
-    if (offs != mem.len()) {
-	logE_ (_func, "Couldn't parse duration \"", mem, "\"");
-	return Result::Failure;
-    }
-
-    switch (i) {
-	case 0:
-	    *ret_duration = (Time) num [0];
-	    break;
-	case 1:
-	    *ret_duration = ((Time) num [0] * 60) + ((Time) num [1]);
-	    break;
-	case 2:
-	    unreachable ();
-	    break;
-	case 3:
-	    *ret_duration = ((Time) num [0] * 3600) + ((Time) num [1] * 60) + ((Time) num [2]);
-	    break;
-	default:
-	    unreachable ();
-    }
-
-    return Result::Success;
-}
-
 void
 Playlist::parseItemAttributes (xmlNodePtr      node,
 			       Playlist::Item * const mt_nonnull item)
 {
+    {
+	xmlChar * const id_val = xmlGetProp (node, (xmlChar const *) "id");
+	if (id_val)
+	    item->id = grab (new String ((char const *) id_val));
+    }
+
     {
 	item->start_time = 0;
 	item->start_immediate = true;
