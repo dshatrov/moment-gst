@@ -39,7 +39,7 @@ private:
     {
     };
 
-    // TODO Playback should be a separate objects, not a nested class.
+    // TODO Playback should be a separate object, not a nested class.
     class Playback : public HashEntry<>,
 		     public Object
     {
@@ -75,6 +75,66 @@ private:
 		  MemoryComparator<> >
 	    PlaybackHash;
 
+    class Channel : public HashEntry<>,
+		    public Referenced
+    {
+    public:
+	enum Type {
+	    Type_Playback,
+	    Type_Stream
+	};
+
+    private:
+	Type const type;
+
+    public:
+	Type getType() const
+	{
+	    return type;
+	}
+
+	Ref<String> channel_name;
+
+	Channel (Type const type)
+	    : type (type)
+	{
+	}
+    };
+
+    typedef Hash< Channel,
+		  Memory,
+		  MemberExtractor< Channel,
+				   Ref<String>,
+				   &Channel::channel_name,
+				   Memory,
+				   AccessorExtractor< String,
+						      Memory,
+						      &String::mem > >,
+		  MemoryComparator<> >
+	    ChannelHash;
+
+    class Channel_Playback : public Channel
+    {
+    public:
+	Playback *playback;
+
+	Channel_Playback ()
+	    : Channel (Channel::Type_Playback)
+	{
+	}
+    };
+
+    class Channel_Stream : public Channel
+    {
+    public:
+	GstStream *stream;
+
+	Channel_Stream ()
+	    : Channel (Channel::Type_Stream)
+	{
+	}
+    };
+
     mt_const MomentServer *moment;
     mt_const Timers *timers;
     mt_const PagePool *page_pool;
@@ -90,6 +150,8 @@ private:
     typedef IntrusiveList<GstStream> StreamList;
     mt_mutex (mutex) StreamList stream_list;
 
+    mt_mutex (mutex) ChannelHash channel_hash;
+
     void parseSourcesConfigSection ();
     void parseChainsConfigSection ();
     void parseStreamsConfigSection ();
@@ -101,11 +163,22 @@ private:
 
     mt_mutex (playback->mutex) static void advancePlayback (Playback *playback);
 
+    mt_mutex (playback->mutex) static void startPlayback (Playback       *playback,
+							  Playlist::Item *item,
+							  Time            seek,
+							  Time            duration,
+							  bool            duration_full);
+
     static void playbackTimerTick (void *_playback);
 
     Result updatePlaylist (ConstMemory  playlist_name,
 			   bool         keep_cur_item,
 			   Ref<String> * mt_nonnull ret_err_msg);
+
+    Result setPosition (ConstMemory channel_name,
+			ConstMemory item_name,
+			bool        item_name_is_id,
+			ConstMemory seek_str);
 
     void createStream (ConstMemory stream_name,
 		       ConstMemory stream_spec,
