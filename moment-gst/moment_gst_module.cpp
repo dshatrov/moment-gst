@@ -84,6 +84,12 @@ MomentGstModule::createPlayback (ConstMemory const stream_name,
     playback->cur_stream_ticket = NULL;
     playback->cur_item_start_time = 0;
 
+    playback->delayed_start = false;
+    playback->delayed_item = NULL;
+    playback->delayed_seek = 0;
+    playback->delayed_duration = 0;
+    playback->delayed_duration_full = false;
+
     {
 	Ref<String> err_msg;
 	if (!playback->playlist.parsePlaylistFile (playlist_filename, &err_msg)) {
@@ -146,43 +152,88 @@ MomentGstModule::createPlayback (ConstMemory const stream_name,
 }
 
 mt_mutex (playback->mutex) void
+MomentGstModule::stopCurItemPlayback (Playback * const playback)
+{
+    playback->delayed_start = false;
+
+    if (playback->playback_timer) {
+	playback->timers->deleteTimer (playback->playback_timer);
+	playback->playback_timer = NULL;
+    }
+
+    playback->stream->endVideoStream ();
+}
+
+mt_mutex (playback->mutex) void
 MomentGstModule::advancePlayback (Playback * const playback)
 {
-    Time start_rel; // FIXME Unused
+    if (playback->playback_timer) {
+	playback->timers->deleteTimer (playback->playback_timer);
+	playback->playback_timer = NULL;
+    }
+
+    stopCurItemPlayback (playback);
+
+    Time start_rel;
     Time seek;
     Time duration;
     bool duration_full;
-    Playlist::Item * const item = playback->playlist.getNextItem (playback->cur_item,
-								  getUnixtime(),
-								  0 /* time_offset */,
-								  &start_rel,
-								  &seek,
-								  &duration,
-								  &duration_full);
-    if (!item) {
-	if (!playback->cur_item) {
-	  // Empty playlist
-	    logD_ (_func, "Empty playlist");
+
+    Playlist::Item *item;
+    if (!playback->delayed_start) {
+	item = playback->playlist.getNextItem (playback->cur_item,
+					       getUnixtime(),
+					       0 /* time_offset */,
+					       &start_rel,
+					       &seek,
+					       &duration,
+					       &duration_full);
+	if (!item) {
+	    if (!playback->cur_item) {
+	      // Empty playlist
+		logD_ (_func, "Empty playlist");
+		return;
+	    }
+
+	    playback->cur_item = NULL;
+	    playback->cur_stream_ticket = NULL;
+
+	    logD_ (_func, "Playlist end");
+
+	    // FIXME 0 timeout causes busy-looping
+	    playback->playback_timer = playback->timers->addTimer (playbackTimerTick,
+								   playback /* cb_data */,
+								   playback /* coderef_container */,
+								   0 /* time_seconds */,
+								   false /* periodical */);
 	    return;
 	}
 
-	playback->cur_item = NULL;
-	playback->cur_stream_ticket = NULL;
+	logD_ (_func, "chain_spec: ", item->chain_spec);
+	logD_ (_func, "start_rel: ", start_rel, ", seek: ", seek, ", "
+	       "duration: ", duration, ", duration_full: ", (duration_full ? "true" : "false"));
 
-	logD_ (_func, "Playlist end");
+	if (start_rel > 0) {
+	    playback->delayed_item = item;
+	    playback->delayed_start = true;
+	    playback->delayed_seek = seek;
+	    playback->delayed_duration = duration;
+	    playback->delayed_duration_full = duration_full;
+	    playback->playback_timer = playback->timers->addTimer (playbackTimerTick,
+								   playback /* cb_data */,
+								   playback /* coderef_container */,
+								   start_rel,
+								   false /* periodical */);
+	    return;
+	}
+    } else {
+	item = playback->delayed_item;
+	seek = playback->delayed_seek;
+	duration = playback->delayed_duration;
+	duration_full = playback->delayed_duration_full;
 
-	// FIXME 0 timeout causes busy-looping
-	playback->playback_timer = playback->timers->addTimer (playbackTimerTick,
-							       playback /* cb_data */,
-							       playback /* coderef_container */,
-							       0 /* time_seconds */,
-							       false /* periodical */);
-	return;
+	playback->delayed_start = false;
     }
-
-    logD_ (_func, "chain_spec: ", item->chain_spec);
-    logD_ (_func, "start_rel: ", start_rel, ", seek: ", seek, ", "
-	   "duration: ", duration, ", duration_full: ", (duration_full ? "true" : "false"));
 
     startPlayback (playback, item, seek, duration, duration_full);
 }
@@ -194,12 +245,7 @@ MomentGstModule::startPlayback (Playback       * const playback,
 				Time             const duration,
 				bool             const duration_full)
 {
-    if (playback->playback_timer) {
-	playback->timers->deleteTimer (playback->playback_timer);
-	playback->playback_timer = NULL;
-    }
-
-    playback->stream->endVideoStream ();
+    stopCurItemPlayback (playback);
 
     playback->cur_item = item;
     playback->cur_stream_ticket = grab (new StreamTicket);

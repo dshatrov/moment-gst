@@ -52,15 +52,26 @@ private:
 
 	mt_const Ref<GstStream> stream;
 
-	mt_mutex (mutex) Playlist playlist;
+	mt_mutex (mutex)
+	mt_begin
 
-	mt_mutex (mutex) Playlist::Item *cur_item;
-	// TODO Unused
-	mt_mutex (mutex) Time cur_item_start_time;
+	  Playlist playlist;
 
-	mt_mutex (mutex) Ref<StreamTicket> cur_stream_ticket;
+	  Playlist::Item *cur_item;
+	  // TODO Unused
+	  Time cur_item_start_time;
 
-	mt_mutex (mutex) Timers::TimerKey playback_timer;
+	  Ref<StreamTicket> cur_stream_ticket;
+
+	  Timers::TimerKey playback_timer;
+
+	  bool delayed_start;
+	  Playlist::Item *delayed_item;
+	  Time delayed_seek;
+	  Time delayed_duration;
+	  bool delayed_duration_full;
+
+	mt_end
     };
 
     typedef Hash< Playback,
@@ -160,6 +171,8 @@ private:
 			 ConstMemory playlist_filename,
 			 bool        recording,
 			 ConstMemory ecord_filename);
+
+    mt_mutex (playback->mutex) static void stopCurItemPlayback (Playback *playback);
 
     mt_mutex (playback->mutex) static void advancePlayback (Playback *playback);
 
