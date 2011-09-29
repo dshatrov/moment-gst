@@ -1298,7 +1298,7 @@ GstStream::reportStatusEvents ()
     mutex.unlock ();
 }
 
-void
+mt_const void
 GstStream::init (ConstMemory   const stream_name,
 		 ConstMemory   const stream_spec,
 		 bool          const is_chain,

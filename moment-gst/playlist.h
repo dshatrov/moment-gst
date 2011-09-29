@@ -109,13 +109,13 @@ public:
 
 public:
     // @cur_time - Current unixtime.
-    Item* getNextItem (Item   *prv_item,
-		       Time    cur_time,
-		       Int64   time_offset,
-		       Time   * mt_nonnull ret_start_rel,
-		       Time   * mt_nonnull ret_seek,
-		       Time   * mt_nonnull ret_duration,
-		       bool   * mt_nonnull ret_duration_full);
+    Item* getNextItem (Item  *prv_item,
+		       Time   cur_time,
+		       Int64  time_offset,
+		       Time  * mt_nonnull ret_start_rel,
+		       Time  * mt_nonnull ret_seek,
+		       Time  * mt_nonnull ret_duration,
+		       bool  * mt_nonnull ret_duration_full);
 
     Item* getItemById (ConstMemory id);
 

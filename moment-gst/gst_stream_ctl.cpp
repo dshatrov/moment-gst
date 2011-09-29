@@ -263,7 +263,7 @@ GstStreamCtl::endVideoStream ()
     mutex.unlock ();
 }
 
-void
+mt_const void
 GstStreamCtl::init (MomentServer      * const moment,
 		    DeferredProcessor * const deferred_processor,
 		    ConstMemory         const stream_name,

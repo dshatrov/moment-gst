@@ -33,13 +33,13 @@ using namespace Moment;
 namespace MomentGst {
 
 Playlist::Item*
-Playlist::getNextItem (Item   * const prv_item,
-		       Time     const cur_time,
-		       Int64    const time_offset,
-		       Time   * const mt_nonnull ret_start_rel,
-		       Time   * const mt_nonnull ret_seek,
-		       Time   * const mt_nonnull ret_duration,
-		       bool   * const mt_nonnull ret_duration_full)
+Playlist::getNextItem (Item  * const prv_item,
+		       Time    const cur_time,
+		       Int64   const time_offset,
+		       Time  * const mt_nonnull ret_start_rel,
+		       Time  * const mt_nonnull ret_seek,
+		       Time  * const mt_nonnull ret_duration,
+		       bool  * const mt_nonnull ret_duration_full)
 {
     logD_ (_func, "cur_time: ", cur_time, ", time_offset: ", time_offset);
 
