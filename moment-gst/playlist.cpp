@@ -19,7 +19,6 @@
 
 #include <libmary/types.h>
 #include <time.h>
-#include <libxml/parser.h>
 #include <glib.h>
 
 #include <libmary/libmary.h>
@@ -259,7 +258,7 @@ Playlist::doParsePlaylist (xmlDocPtr doc)
 	logD_ (_func, "cur_node_name: ", cur_node_name);
 
 	if (equal (cur_node_name, "item")) {
-	    Playlist::Item * const item = new Playlist::Item;
+	    Item * const item = new Item;
 	    item_list.append (item);
 	    parseItem (doc, cur_node, item);
 	    if (item->id)
@@ -535,8 +534,8 @@ static Result parseTime (xmlChar * const mt_nonnull time_str,
 }
 
 void
-Playlist::parseItemAttributes (xmlNodePtr      node,
-			       Playlist::Item * const mt_nonnull item)
+Playlist::parseItemAttributes (xmlNodePtr  node,
+			       Item       * const mt_nonnull item)
 {
     {
 	xmlChar * const id_val = xmlGetProp (node, (xmlChar const *) "id");
@@ -649,6 +648,20 @@ static void reportXmlParsingError (ConstMemory   const filename,
 	if (ret_err_msg)
 	    *ret_err_msg = NULL;
     }
+}
+
+void
+Playlist::setSingleItem (ConstMemory const stream_spec,
+			 bool        const is_chain)
+{
+    Item * const item = new Item;
+
+    if (is_chain)
+	item->chain_spec = grab (new String (stream_spec));
+    else
+	item->uri = grab (new String (stream_spec));
+
+    item_list.append (item);
 }
 
 mt_throws Result

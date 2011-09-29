@@ -21,6 +21,9 @@
 #define __MOMENT_GST__PLAYLIST__H__
 
 
+#include <libmary/types.h>
+#include <libxml/parser.h>
+
 #include <moment/libmoment.h>
 
 
@@ -31,6 +34,7 @@ using namespace Moment;
 
 mt_unsafe class Playlist
 {
+// TODO private
 public:
     class Item : public IntrusiveListElement<>,
 		 public HashEntry<>
@@ -100,8 +104,8 @@ public:
 			   xmlNodePtr  media_node,
 			   Item       * mt_nonnull item);
 
-    static void parseItemAttributes (xmlNodePtr      node,
-				     Playlist::Item * mt_nonnull item);
+    static void parseItemAttributes (xmlNodePtr  node,
+				     Item       * mt_nonnull item);
 
 public:
     // @cur_time - Current unixtime.
@@ -118,6 +122,9 @@ public:
     Item* getNthItem (Count idx);
 
     void clear ();
+
+    void setSingleItem (ConstMemory stream_spec,
+			bool        is_chain);
 
     mt_throws Result parsePlaylistFile (ConstMemory  filename,
 					Ref<String> *ret_err_msg);

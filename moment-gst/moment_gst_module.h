@@ -24,7 +24,7 @@
 #include <moment/libmoment.h>
 
 #include <moment-gst/gst_stream.h>
-#include <moment-gst/playlist.h>
+#include <moment-gst/channel.h>
 
 
 namespace MomentGst {
@@ -35,116 +35,34 @@ using namespace Moment;
 class MomentGstModule : public Object
 {
 private:
-    class StreamTicket : public Referenced
-    {
-    };
-
-    // TODO Playback should be a separate object, not a nested class.
-    class Playback : public HashEntry<>,
-		     public Object
+    class ChannelEntry : public HashEntry<>
     {
     public:
-	mt_const WeakRef<MomentGstModule> weak_module;
-	mt_const Timers *timers;
+	mt_const Ref<Channel> channel;
 
-	mt_const Ref<String> stream_name;
+	mt_const Ref<String> channel_name;
 	mt_const Ref<String> playlist_filename;
-
-	mt_const Ref<GstStream> stream;
-
-	mt_mutex (mutex)
-	mt_begin
-
-	  Playlist playlist;
-
-	  Playlist::Item *cur_item;
-	  // TODO Unused
-	  Time cur_item_start_time;
-
-	  Ref<StreamTicket> cur_stream_ticket;
-
-	  Timers::TimerKey playback_timer;
-
-	  bool delayed_start;
-	  Playlist::Item *delayed_item;
-	  Time delayed_seek;
-	  Time delayed_duration;
-	  bool delayed_duration_full;
-
-	mt_end
     };
 
-    typedef Hash< Playback,
+    typedef Hash< ChannelEntry,
 		  Memory,
-		  MemberExtractor< Playback,
+		  MemberExtractor< ChannelEntry,
 				   Ref<String>,
-				   &Playback::stream_name,
+				   &ChannelEntry::channel_name,
 				   Memory,
 				   AccessorExtractor< String,
 						      Memory,
 						      &String::mem > >,
 		  MemoryComparator<> >
-	    PlaybackHash;
+	    ChannelEntryHash;
 
-    class Channel : public HashEntry<>,
-		    public Referenced
+#if 0
+    class RecorderEntry : public IntrusiveListElement<>
     {
     public:
-	enum Type {
-	    Type_Playback,
-	    Type_Stream
-	};
-
-    private:
-	Type const type;
-
-    public:
-	Type getType() const
-	{
-	    return type;
-	}
-
-	Ref<String> channel_name;
-
-	Channel (Type const type)
-	    : type (type)
-	{
-	}
+	Ref<Recorder> recorder;
     };
-
-    typedef Hash< Channel,
-		  Memory,
-		  MemberExtractor< Channel,
-				   Ref<String>,
-				   &Channel::channel_name,
-				   Memory,
-				   AccessorExtractor< String,
-						      Memory,
-						      &String::mem > >,
-		  MemoryComparator<> >
-	    ChannelHash;
-
-    class Channel_Playback : public Channel
-    {
-    public:
-	Playback *playback;
-
-	Channel_Playback ()
-	    : Channel (Channel::Type_Playback)
-	{
-	}
-    };
-
-    class Channel_Stream : public Channel
-    {
-    public:
-	GstStream *stream;
-
-	Channel_Stream ()
-	    : Channel (Channel::Type_Stream)
-	{
-	}
-    };
+#endif
 
     mt_const MomentServer *moment;
     mt_const Timers *timers;
@@ -156,35 +74,9 @@ private:
     mt_const Uint64 default_height;
     mt_const Uint64 default_bitrate;
 
-    mt_mutex (mutex) PlaybackHash playback_hash;
+    mt_mutex (mutex) ChannelEntryHash channel_entry_hash;
 
-    typedef IntrusiveList<GstStream> StreamList;
-    mt_mutex (mutex) StreamList stream_list;
-
-    mt_mutex (mutex) ChannelHash channel_hash;
-
-    void parseSourcesConfigSection ();
-    void parseChainsConfigSection ();
-    void parseStreamsConfigSection ();
-
-    void createPlayback (ConstMemory stream_name,
-			 ConstMemory playlist_filename,
-			 bool        recording,
-			 ConstMemory ecord_filename);
-
-    mt_mutex (playback->mutex) static void stopCurItemPlayback (Playback *playback);
-
-    mt_mutex (playback->mutex) static void advancePlayback (Playback *playback);
-
-    mt_mutex (playback->mutex) static void startPlayback (Playback       *playback,
-							  Playlist::Item *item,
-							  Time            seek,
-							  Time            duration,
-							  bool            duration_full);
-
-    static void playbackTimerTick (void *_playback);
-
-    Result updatePlaylist (ConstMemory  playlist_name,
+    Result updatePlaylist (ConstMemory  channel_name,
 			   bool         keep_cur_item,
 			   Ref<String> * mt_nonnull ret_err_msg);
 
@@ -192,25 +84,6 @@ private:
 			ConstMemory item_name,
 			bool        item_name_is_id,
 			ConstMemory seek_str);
-
-    void createStream (ConstMemory stream_name,
-		       ConstMemory stream_spec,
-		       bool        is_chain,
-		       bool        recording,
-		       ConstMemory record_filename);
-
-    mt_iface (GstStream::Frontend)
-    mt_begin
-
-      static GstStream::Frontend gst_stream_frontend;
-
-      static void streamError (void *stream_ticket,
-			       void *_playback);
-
-      static void streamEos (void *stream_ticket,
-			     void *_playback);
-
-    mt_end
 
     mt_iface (HttpService::Frontend)
     mt_begin
@@ -224,6 +97,21 @@ private:
 				      void         *_self);
 
     mt_end
+
+    void createPlaylistChannel (ConstMemory channel_name,
+				ConstMemory playlist_filename,
+				bool        recording,
+				ConstMemory record_filename);
+
+    void createStreamChannel (ConstMemory stream_name,
+			      ConstMemory stream_spec,
+			      bool        is_chain,
+			      bool        recording,
+			      ConstMemory record_filename);
+
+    void parseSourcesConfigSection ();
+    void parseChainsConfigSection ();
+    void parseStreamsConfigSection ();
 
 public:
     Result init (MomentServer *moment);

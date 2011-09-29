@@ -32,153 +32,31 @@ namespace MomentGst {
 using namespace M;
 using namespace Moment;
 
-class GstStream : public IntrusiveListElement<>,
-		  public Object
+class GstStream : public Object
 {
 public:
-    struct Frontend
-    {
-	void (*error) (void *stream_ticket,
-		       void *cb_data);
+    struct Frontend {
+	void (*error) (void *cb_data);
 
 	// End of stream.
-	void (*eos) (void *stream_ticket,
-		     void *cb_data);
+	void (*eos) (void *cb_data);
+
+	void (*noVideo) (void *cb_data);
+
+	// Called with gstreamer locks held.
+	void (*statusEvent) (void *cb_data);
     };
 
 private:
-    // StreamControl object helps to resolve deadlocks caused by mixing
-    // GstStream::mutex and internal gstreamer locks.
-    //
-    // A pseudo-code example ('mnt' - GstStream::mutex, 'gst' - gstreamer locks,
-    // 'ctl' - StreamControl::mutex) follows.
-    //
-    // Without StreamControl, synchronization looked like this:
-    //
-    //     A method of GstStream makes a gstreamer call:
-    //         mnt { gst{} }
-    //
-    //     A callback called by gstreamer accesses GstStream data:
-    //         gst { mnt{} }
-    //
-    // The above example involves lock order inversion, which means deadlocks.
-    // With StreamControl, callbacks called by gstreamer access StreamControl
-    // data, and not GstStream data, which resolves the deadlock:
-    //
-    //     A method of GstStream makes a gstreamer call:
-    //         mnt { ctl{} gst{} }
-    //
-    //     A callback called by gstreamer accesses GstStream data:
-    //         gst { ctl{} }
-    //
-    class StreamControl : public Referenced
-    {
-    public:
-	mt_const GstStream *gst_stream;
-	mt_const PagePool *page_pool;
-	mt_const VideoStream *video_stream;
-
-	mt_const VirtRef stream_ticket_ref;
-	mt_const void *stream_ticket;
-
-	mt_const bool send_metadata;
-
-	mt_mutex (ctl_mutex)
-	mt_begin
-
-	  GstElement *playbin;
-
-	  Time initial_seek;
-	  bool initial_seek_pending;
-
-	  RtmpServer::MetaData metadata;
-
-	  Cond metadata_reported_cond;
-	  bool metadata_reported;
-
-	  Time last_frame_time;
-
-	  // TODO Unify with 'video_codec'.
-	  VideoStream::AudioCodecId audio_codec_id;
-	  Byte audio_hdr;
-
-	  VideoStream::VideoCodecId video_codec_id;
-	  Byte video_hdr;
-
-	  bool got_video;
-	  bool got_audio;
-
-	  bool first_audio_frame;
-	  Count audio_skip_counter;
-
-	  bool first_video_frame;
-
-	  Uint64 prv_audio_timestamp;
-
-	  bool error_pending;
-	  bool eos_pending;
-
-	mt_end
-
-	Mutex ctl_mutex;
-
-	mt_mutex (ctl_mutex) void reportMetaData ();
-
-	mt_mutex (ctl_mutex) void doAudioData (GstBuffer *buffer);
-
-	static gboolean audioDataCb (GstPad    * /* pad */,
-				     GstBuffer *buffer,
-				     gpointer   _ctl);
-
-	static void handoffAudioDataCb (GstElement * /* element */,
-					GstBuffer  *buffer,
-					GstPad     * /* pad */,
-					gpointer    _ctl);
-
-	mt_mutex (ctl_mutex) void doVideoData (GstBuffer *buffer);
-
-	static gboolean videoDataCb (GstPad    * /* pad */,
-				     GstBuffer *buffer,
-				     gpointer   _ctl);
-
-	static void handoffVideoDataCb (GstElement * /* element */,
-					GstBuffer  *buffer,
-					GstPad     * /* pad */,
-					gpointer    _ctl);
-
-#if 0
-    // Unused
-	static gboolean busCallCb (GstBus     *bus,
-				   GstMessage *msg,
-				   gpointer    _ctl);
-#endif
-
-	static GstBusSyncReply busSyncHandler (GstBus     *bus,
-					       GstMessage *msg,
-					       gpointer    _ctl);
-
-	void init (GstStream   *gst_stream,
-		   PagePool    *page_pool,
-		   VideoStream *video_stream,
-		   bool         send_metadata);
-
-	StreamControl ();
-    };
-
-    mt_const Cb<Frontend> frontend;
-
-    mt_const MomentServer *moment;
-    mt_const Timers *timers;
-    mt_const PagePool *page_pool;
-
+    // For log lines.
     mt_const Ref<String> stream_name;
 
-    DeferredProcessor::Registration deferred_reg;
-    DeferredProcessor::Task deferred_task;
+    mt_const Timers *timers;
+    mt_const PagePool *page_pool;
+    mt_const Ref<VideoStream> video_stream;
 
-    mt_mutex (mutex) bool valid;
-
-  // Defaults
+    mt_const Ref<String> stream_spec;
+    mt_const bool is_chain;
 
     mt_const bool send_metadata;
 
@@ -186,88 +64,135 @@ private:
     mt_const Uint64 default_height;
     mt_const Uint64 default_bitrate;
 
-  // Stream source description
+    mt_mutex (ctl_mutex)
+    mt_begin
 
-    mt_mutex (mutex) Ref<String> stream_spec;
-    mt_mutex (mutex) bool is_chain;
+      Timers::TimerKey no_video_timer;
 
-    // TODO Remember stream position
-    mt_mutex (mutex) Time stream_position;
+      GstElement *playbin;
+      gulong audio_probe_id;
+      gulong video_probe_id;
 
-  // Recording state
+      Time initial_seek;
+      bool initial_seek_pending;
 
-    mt_const ServerThreadContext *recorder_thread_ctx;
+      RtmpServer::MetaData metadata;
+      Cond metadata_reported_cond;
+      bool metadata_reported;
 
-    mt_async AvRecorder recorder;
-    mt_async FlvMuxer flv_muxer;
+      Time last_frame_time;
 
-    mt_mutex (mutex) bool recording;
-    mt_mutex (mutex) ConstMemory record_filename;
+      VideoStream::AudioCodecId audio_codec_id;
+      Byte audio_hdr;
 
-  // Gstreamer state
+      VideoStream::VideoCodecId video_codec_id;
+      Byte video_hdr;
 
-    mt_mutex (mutex) GstElement *playbin;
-    mt_mutex (mutex) GstElement *encoder;
-    mt_mutex (mutex) gulong audio_probe_id;
-    mt_mutex (mutex) gulong video_probe_id;
+      bool got_video;
+      bool got_audio;
 
-  // Video stream state
+      bool first_audio_frame;
+      Count audio_skip_counter;
 
-    mt_mutex (mutex) Ref<VideoStream> video_stream;
-    mt_mutex (mutex) MomentServer::VideoStreamKey video_stream_key;
+      bool first_video_frame;
 
-    mt_mutex (mutex) Ref<StreamControl> stream_ctl;
+      Uint64 prv_audio_timestamp;
 
-    mt_mutex (mutex) Timers::TimerKey no_video_timer;
+      // This flag helps to prevent concurrent pipeline state transition
+      // requests (to NULL and to PLAYING states).
+      bool changing_state_to_playing;
 
-    // Separate state mutex to decouple from synchronization of deletion
-    // subscriptions.
-    StateMutex mutex;
+      bool reporting_status_events;
 
-    static bool deferredTask (void *_self);
+      // No "no_video" notifications should be made after error or eos
+      // notification for the same GstStream instance.
+      bool no_video_pending;
+      bool error_pending;
+      bool eos_pending;
+      // If 'true', then no further notifications for this GstStream
+      // instance should be made.
+      // 'close_notified' is set to true after error or eos notification.
+      bool close_notified;
 
-    class CreateVideoStream_Data;
+      // If 'true', then the stream associated with this GstStream
+      // instance has been closed, which means that all associated gstreamer
+      // objects should be released.
+      bool stream_closed;
 
-    mt_mutex (mutex) void createVideoStream (Time            initial_seek,
-					     void           *stream_ticket,
-					     VirtReferenced *stream_ticket_ref);
+    mt_end
 
-    static gpointer streamThreadFunc (gpointer _self);
+    mt_const Cb<Frontend> frontend;
 
-    mt_mutex (mutex) void doCloseVideoStream ();
-    mt_mutex (mutex) mt_unlocks (stream_ctl->ctl_mutex) void restartStream ();
+  // Pipeline manipulation
+
+    void createPipelineForChainSpec ();
+    void createPipelineForUri ();
+
+    mt_unlocks (mutex) Result setPipelinePlaying ();
+
+    void pipelineCreationFailed ();
+
+  // Audio/video data handling
+
+    mt_mutex (mutex) void reportMetaData ();
+
+  // Audio data handling
+
+    mt_mutex (mutex) void doAudioData (GstBuffer *buffer);
+
+    static gboolean audioDataCb (GstPad    * /* pad */,
+				 GstBuffer *buffer,
+				 gpointer   _self);
+
+    static void handoffAudioDataCb (GstElement * /* element */,
+				    GstBuffer  *buffer,
+				    GstPad     * /* pad */,
+				    gpointer    _self);
+
+  // Video data handling
+
+    mt_mutex (mutex) void doVideoData (GstBuffer *buffer);
+
+    static gboolean videoDataCb (GstPad    * /* pad */,
+				 GstBuffer *buffer,
+				 gpointer   _self);
+
+    static void handoffVideoDataCb (GstElement * /* element */,
+				    GstBuffer  *buffer,
+				    GstPad     * /* pad */,
+				    gpointer    _self);
+
+  // State management
+
+    static GstBusSyncReply busSyncHandler (GstBus     *bus,
+					   GstMessage *msg,
+					   gpointer    _self);
 
     static void noVideoTimerTick (void *_self);
 
-    mt_mutex (mutex) Result createPipelineForChainSpec ();
-    mt_mutex (mutex) Result createPipelineForUri ();
-    mt_mutex (mutex) Result createPipeline ();
-
 public:
-    void beginVideoStream (ConstMemory     stream_spec,
-			   bool            is_chain,
-			   void           *stream_ticket,
-			   VirtReferenced *stream_ticket_ref,
-			   Time            seek = 0);
+    void createPipeline ();
 
-    void endVideoStream ();
+    void releasePipeline ();
 
-    mt_const void init (MomentServer      *moment,
-			DeferredProcessor *deferred_processor,
-			ConstMemory        stream_name,
-			bool               recording,
-			ConstMemory        record_filename,
-			bool               send_metadata,
-			Uint64             default_width,
-			Uint64             default_height,
-			Uint64             default_bitrate);
-
-    void release ();
+    void reportStatusEvents ();
 
     mt_const void setFrontend (CbDesc<Frontend> const &frontend)
     {
 	this->frontend = frontend;
     }
+
+    mt_const void init (ConstMemory     stream_name,
+			ConstMemory     stream_spec,
+			bool            is_chain,
+			Timers         *timers,
+			PagePool       *page_pool,
+			VideoStream    *video_stream,
+			Time            initial_seek,
+			bool            send_metadata,
+			Uint64          default_width,
+			Uint64          default_height,
+			Uint64          default_bitrate);
 
     GstStream ();
 

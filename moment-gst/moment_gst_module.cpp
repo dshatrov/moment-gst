@@ -68,262 +68,43 @@ using namespace Moment;
 
 namespace MomentGst {
 
-void
-MomentGstModule::createPlayback (ConstMemory const stream_name,
-				 ConstMemory const playlist_filename,
-				 bool        const recording,
-				 ConstMemory const record_filename)
-{
-    Playback * const playback = new Playback;
-    assert (playback);
-    playback->weak_module = this;
-
-    playback->stream_name = grab (new String (stream_name));
-    playback->playlist_filename = grab (new String (playlist_filename));
-    playback->cur_item = NULL;
-    playback->cur_stream_ticket = NULL;
-    playback->cur_item_start_time = 0;
-
-    playback->delayed_start = false;
-    playback->delayed_item = NULL;
-    playback->delayed_seek = 0;
-    playback->delayed_duration = 0;
-    playback->delayed_duration_full = false;
-
-    {
-	Ref<String> err_msg;
-	if (!playback->playlist.parsePlaylistFile (playlist_filename, &err_msg)) {
-	    logE_ (_func, "Could not parse playlist file \"", playlist_filename, "\":\n", err_msg);
-	    playback->unref ();
-	    return;
-	}
-    }
-
-//    playItem (&playback->root_block);
-
-    playback->timers = timers;
-
-    Channel_Playback * const channel__playback = new Channel_Playback;
-    assert (channel__playback);
-    channel__playback->channel_name = playback->stream_name;
-    channel__playback->playback = playback;
-
-    mutex.lock ();
-
-    channel_hash.add (channel__playback);
-
-    {
-	Ref<GstStream> const stream = grab (new GstStream);
-
-//	mutex.lock ();
-	stream_list.append (stream);
-//	mutex.unlock ();
-	stream->ref ();
-
-	stream->init (moment,
-		      moment->getServerApp()->getMainThreadContext()->getDeferredProcessor(),
-		      stream_name,
-		      recording,
-		      record_filename,
-		      send_metadata,
-		      default_width,
-		      default_height,
-		      default_bitrate);
-
-	stream->setFrontend (CbDesc<GstStream::Frontend> (
-		&gst_stream_frontend, playback /* cb_data */, playback /* coderef_container */));
-
-//	stream->beginVideoStream (stream_spec, is_chain);
-
-	playback->stream = stream;
-    }
-
-    playback_hash.add (playback);
-
-    playback->mutex.lock ();
-    playback->playback_timer = timers->addTimer (playbackTimerTick,
-						 playback /* cb_data */,
-						 playback /* coderef_container */,
-						 0 /* time_seconds */,
-						 false /* periodical */);
-    playback->mutex.unlock ();
-
-    mutex.unlock ();
-}
-
-mt_mutex (playback->mutex) void
-MomentGstModule::stopCurItemPlayback (Playback * const playback)
-{
-    playback->delayed_start = false;
-
-    if (playback->playback_timer) {
-	playback->timers->deleteTimer (playback->playback_timer);
-	playback->playback_timer = NULL;
-    }
-
-    playback->stream->endVideoStream ();
-}
-
-mt_mutex (playback->mutex) void
-MomentGstModule::advancePlayback (Playback * const playback)
-{
-    if (playback->playback_timer) {
-	playback->timers->deleteTimer (playback->playback_timer);
-	playback->playback_timer = NULL;
-    }
-
-    stopCurItemPlayback (playback);
-
-    Time start_rel;
-    Time seek;
-    Time duration;
-    bool duration_full;
-
-    Playlist::Item *item;
-    if (!playback->delayed_start) {
-	item = playback->playlist.getNextItem (playback->cur_item,
-					       getUnixtime(),
-					       0 /* time_offset */,
-					       &start_rel,
-					       &seek,
-					       &duration,
-					       &duration_full);
-	if (!item) {
-	    if (!playback->cur_item) {
-	      // Empty playlist
-		logD_ (_func, "Empty playlist");
-		return;
-	    }
-
-	    playback->cur_item = NULL;
-	    playback->cur_stream_ticket = NULL;
-
-	    logD_ (_func, "Playlist end");
-
-	    // FIXME 0 timeout causes busy-looping
-	    playback->playback_timer = playback->timers->addTimer (playbackTimerTick,
-								   playback /* cb_data */,
-								   playback /* coderef_container */,
-								   0 /* time_seconds */,
-								   false /* periodical */);
-	    return;
-	}
-
-	logD_ (_func, "chain_spec: ", item->chain_spec);
-	logD_ (_func, "start_rel: ", start_rel, ", seek: ", seek, ", "
-	       "duration: ", duration, ", duration_full: ", (duration_full ? "true" : "false"));
-
-	if (start_rel > 0) {
-	    playback->delayed_item = item;
-	    playback->delayed_start = true;
-	    playback->delayed_seek = seek;
-	    playback->delayed_duration = duration;
-	    playback->delayed_duration_full = duration_full;
-	    playback->playback_timer = playback->timers->addTimer (playbackTimerTick,
-								   playback /* cb_data */,
-								   playback /* coderef_container */,
-								   start_rel,
-								   false /* periodical */);
-	    return;
-	}
-    } else {
-	item = playback->delayed_item;
-	seek = playback->delayed_seek;
-	duration = playback->delayed_duration;
-	duration_full = playback->delayed_duration_full;
-
-	playback->delayed_start = false;
-    }
-
-    startPlayback (playback, item, seek, duration, duration_full);
-}
-
-mt_mutex (playback->mutex) void
-MomentGstModule::startPlayback (Playback       * const playback,
-				Playlist::Item * const item,
-				Time             const seek,
-				Time             const duration,
-				bool             const duration_full)
-{
-    stopCurItemPlayback (playback);
-
-    playback->cur_item = item;
-    playback->cur_stream_ticket = grab (new StreamTicket);
-
-    if (!duration_full) {
-	logD_ (_func, "Setting playback timer to ", duration);
-	playback->playback_timer = playback->timers->addTimer (playbackTimerTick,
-							       playback /* cb_data */,
-							       playback /* coderef_container */,
-							       duration);
-    }
-
-    // TODO Minimum duration limit
-    if (item->chain_spec && !item->chain_spec.isNull()) {
-	playback->stream->beginVideoStream (item->chain_spec->mem(),
-					    true /* is_chain */,
-					    playback->cur_stream_ticket /* stream_ticket */,
-					    playback->cur_stream_ticket /* stream_ticket_ref */,
-					    seek);
-    } else
-    if (item->uri && !item->uri.isNull()) {
-	playback->stream->beginVideoStream (item->uri->mem(),
-					    false /* is_chain */,
-					    playback->cur_stream_ticket /* stream_ticket */,
-					    playback->cur_stream_ticket /* stream_ticket_ref */,
-					    seek);
-    } else {
-	logW_ (_func, "No chain spec and no uri for playlist item");
-    }
-}
-
-void
-MomentGstModule::playbackTimerTick (void * const _playback)
-{
-    Playback * const playback = static_cast <Playback*> (_playback);
-
-    logD_ (_func, "playback 0x", fmt_hex, (UintPtr) _playback, ", cur_item 0x", (UintPtr) playback->cur_item);
-
-    playback->mutex.lock ();
-    advancePlayback (playback);
-    playback->mutex.unlock ();
-}
-
 Result
-MomentGstModule::updatePlaylist (ConstMemory   const playlist_name,
+MomentGstModule::updatePlaylist (ConstMemory   const channel_name,
 				 bool          const keep_cur_item,
 				 Ref<String> * const mt_nonnull ret_err_msg)
 {
-    logD_ (_func, "playlist_name: ", playlist_name);
+    logD_ (_func, "channel_name: ", channel_name);
 
     mutex.lock ();
-    Playback * const playback = playback_hash.lookup (playlist_name);
-    if (!playback) {
+
+    ChannelEntry * const channel_entry = channel_entry_hash.lookup (channel_name);
+    if (!channel_entry) {
 	mutex.unlock ();
-	Ref<String> const err_msg = makeString ("Unknown playlist: ", playlist_name);
+	Ref<String> const err_msg = makeString ("Channel not found: ", channel_name);
 	logE_ (_func, err_msg);
 	*ret_err_msg = err_msg;
 	return Result::Failure;
     }
-    mutex.unlock ();
 
-    playback->mutex.lock ();
-    playback->playlist.clear ();
-    Ref<String> err_msg;
-    if (!playback->playlist.parsePlaylistFile (playback->playlist_filename->mem(), &err_msg)) {
+    if (!channel_entry->playlist_filename) {
 	mutex.unlock ();
-	logE_ (_func, "parsePlaylistFile() failed: ", err_msg);
+	Ref<String> const err_msg = makeString ("No playlist for channel \"", channel_name, "\"");
+	logE_ (_func, err_msg);
+	*ret_err_msg = err_msg;
+	return Result::Failure;
+    }
+
+    Ref<String> err_msg;
+    if (!channel_entry->channel->loadPlaylistFile (
+		channel_entry->playlist_filename->mem(), keep_cur_item, &err_msg))
+    {
+	mutex.unlock ();
+	logE_ (_func, "channel->loadPlaylistFile() failed: ", err_msg);
 	*ret_err_msg = makeString ("Playlist parsing error: ", err_msg->mem());
 	return Result::Failure;
     }
 
-    playback->cur_item = NULL;
-    playback->cur_stream_ticket = NULL;
-
-    if (!keep_cur_item)
-	advancePlayback (playback);
-
-    playback->mutex.unlock ();
+    mutex.unlock ();
 
     return Result::Success;
 }
@@ -342,56 +123,31 @@ MomentGstModule::setPosition (ConstMemory const channel_name,
 
     mutex.lock ();
 
-    Channel * const channel = channel_hash.lookup (channel_name);
-    if (!channel) {
+    ChannelEntry * const channel_entry = channel_entry_hash.lookup (channel_name);
+    if (!channel_entry) {
+	mutex.unlock ();
 	logE_ (_func, "Channel not found: ", channel_name);
 	return Result::Failure;
     }
 
-    if (channel->getType() == Channel::Type_Playback) {
-	Channel_Playback * const channel__playback = static_cast <Channel_Playback*> (channel);
-	Playback * const playback = channel__playback->playback;
-
-	playback->mutex.lock ();
-
-	Playlist::Item *item = NULL;
-	if (item_name_is_id) {
-	    item = playback->playlist.getItemById (item_name);
-	} else {
-	    Count item_idx;
-	    if (!strToUint32_safe (item_name, &item_idx)) {
-		mutex.unlock ();
-		logE_ (_func, "Failed to parse item index");
-		return Result::Failure;
-	    }
-
-	    item = playback->playlist.getNthItem (item_idx);
-	}
-
-	if (!item) {
-	    playback->mutex.unlock ();
+    Result res;
+    if (item_name_is_id) {
+	res = channel_entry->channel->setPosition_Id (item_name, seek);
+    } else {
+	Count item_idx;
+	if (!strToUint32_safe (item_name, &item_idx)) {
 	    mutex.unlock ();
-	    logE_ (_func, "Item not found: ", item_name, item_name_is_id ? " (id)" : " (idx)", ", channel: ", channel_name);
+	    logE_ (_func, "Failed to parse item index");
 	    return Result::Failure;
 	}
 
-        Time duration = 0;
-	if (!item->duration_full) {
-	    if (item->duration >= seek)
-		duration = item->duration - seek;
-	    else
-		duration = 0;
-	}
+	res = channel_entry->channel->setPosition_Index (item_idx, seek);
+    }
 
-        startPlayback (playback, item, seek + item->seek, duration, item->duration_full);
-
-	playback->mutex.unlock ();
-    } else {
-	assert (channel->getType() == Channel::Type_Stream);
-	Channel_Stream * const channel__stream = static_cast <Channel_Stream*> (channel);
-	GstStream * const stream = channel__stream->stream;
-
-      // TODO
+    if (!res) {
+	mutex.unlock ();
+	logE_ (_func, "Item not found: ", item_name, item_name_is_id ? " (id)" : " (idx)", ", channel: ", channel_name);
+	return Result::Failure;
     }
 
     mutex.unlock ();
@@ -400,66 +156,64 @@ MomentGstModule::setPosition (ConstMemory const channel_name,
 }
 
 void
-MomentGstModule::createStream (ConstMemory const stream_name,
-			       ConstMemory const stream_spec,
-			       bool        const is_chain,
-			       bool        const recording,
-			       ConstMemory const record_filename)
+MomentGstModule::createPlaylistChannel (ConstMemory const channel_name,
+					ConstMemory const playlist_filename,
+					bool        const recording,
+					ConstMemory const record_filename)
 {
-    Ref<GstStream> const stream = grab (new GstStream);
+    ChannelEntry * const channel_entry = new ChannelEntry;
 
-    Channel_Stream * const channel__stream = new Channel_Stream;
-    channel__stream->channel_name = grab (new String (stream_name));
-    channel__stream->stream = stream;
+    channel_entry->channel_name = grab (new String (channel_name));
+    channel_entry->playlist_filename = grab (new String (playlist_filename));
+
+    Ref<Channel> const channel = grab (new Channel);
+    channel_entry->channel = channel;
+
+    channel->init (moment,
+		   channel_name,
+		   send_metadata,
+		   default_width,
+		   default_height,
+		   default_bitrate);
 
     mutex.lock ();
-    stream_list.append (stream);
-    channel_hash.add (channel__stream);
+    channel_entry_hash.add (channel_entry);
     mutex.unlock ();
 
-    stream->init (moment,
-		  moment->getServerApp()->getMainThreadContext()->getDeferredProcessor(),
-		  stream_name,
-		  recording,
-		  record_filename,
-		  send_metadata,
-		  default_width,
-		  default_height,
-		  default_bitrate);
-
-    stream->beginVideoStream (stream_spec, is_chain, NULL /* stream_ticket */, NULL /* stream_ticket_ref */);
-
-    stream->ref ();
-}
-
-GstStream::Frontend
-MomentGstModule::gst_stream_frontend = {
-    streamError,
-    streamEos
-};
-
-void
-MomentGstModule::streamError (void * const stream_ticket,
-			      void * const _playback)
-{
-    logD_ (_func, "stream_ticket: 0x", fmt_hex, (UintPtr) stream_ticket);
-}
-
-void
-MomentGstModule::streamEos (void * const stream_ticket,
-			    void * const _playback)
-{
-    logD_ (_func, "stream_ticket: 0x", fmt_hex, (UintPtr) stream_ticket);
-
-    Playback * const playback = static_cast <Playback*> (_playback);
-
-    playback->mutex.lock ();
-    if (!playback->cur_stream_ticket ||
-	(void*) playback->cur_stream_ticket == stream_ticket)
     {
-	advancePlayback (playback);
+	Ref<String> err_msg;
+	if (!channel->loadPlaylistFile (playlist_filename, false /* keep_cur_item */, &err_msg))
+	    logE_ (_func, "Could not parse playlist file \"", playlist_filename, "\":\n", err_msg);
     }
-    playback->mutex.unlock ();
+}
+
+void
+MomentGstModule::createStreamChannel (ConstMemory const channel_name,
+				      ConstMemory const stream_spec,
+				      bool        const is_chain,
+				      bool        const recording,
+				      ConstMemory const record_filename)
+{
+    ChannelEntry * const channel_entry = new ChannelEntry;
+
+    channel_entry->channel_name = grab (new String (channel_name));
+    channel_entry->playlist_filename = NULL;
+
+    Ref<Channel> const channel = grab (new Channel);
+    channel_entry->channel = channel;
+
+    channel->init (moment,
+		   channel_name,
+		   send_metadata,
+		   default_width,
+		   default_height,
+		   default_bitrate);
+
+    mutex.lock ();
+    channel_entry_hash.add (channel_entry);
+    mutex.unlock ();
+
+    channel->setSingleItem (stream_spec, is_chain);
 }
 
 HttpService::HttpHandler MomentGstModule::admin_http_handler = {
@@ -542,75 +296,11 @@ _return:
     return Result::Success;
 }
 
-// TODO Always succeeds currently.
-Result
-MomentGstModule::init (MomentServer * const moment)
-{
-    this->moment = moment;
-    this->timers = moment->getServerApp()->getTimers();
-    this->page_pool = moment->getPagePool();
-
-  // Opening video streams.
-
-    MConfig::Config * const config = moment->getConfig();
-
-    {
-	ConstMemory const opt_name = "mod_gst/send_metadata";
-	MConfig::Config::BooleanValue const val = config->getBoolean (opt_name);
-	if (val == MConfig::Config::Boolean_Invalid) {
-	    logE_ (_func, "Invalid value for ", opt_name, ": ", config->getString (opt_name));
-	    return Result::Failure;
-	}
-
-	if (val == MConfig::Config::Boolean_False) {
-	    send_metadata = false;
-	    logI_ (_func, "onMetaData messages will not be generated by mod_gst. "
-		   "Set \"", opt_name, "\" option to \"yes\" to enable sending of onMetaData messages.");
-	}
-    }
-
-    {
-	ConstMemory const opt_name = "mod_gst/width";
-	MConfig::GetResult const res = config->getUint64_default (opt_name, &default_width, default_width);
-	if (!res) {
-	    logE_ (_func, "bad value for ", opt_name);
-	    return Result::Failure;
-	}
-    }
-
-    {
-	ConstMemory const opt_name = "mod_gst/height";
-	MConfig::GetResult const res = config->getUint64_default (opt_name, &default_height,  default_height);
-	if (!res) {
-	    logE_ (_func, "bad value for ", opt_name);
-	    return Result::Failure;
-	}
-    }
-
-    {
-	ConstMemory const opt_name = "mod_gst/bitrate";
-	MConfig::GetResult const res = config->getUint64_default (opt_name, &default_bitrate,  default_bitrate);
-	if (!res) {
-	    logE_ (_func, "bad value for ", opt_name);
-	    return Result::Failure;
-	}
-    }
-
-    moment->getAdminHttpService()->addHttpHandler (
-	    Cb<HttpService::HttpHandler> (
-		    &admin_http_handler, this /* cb_data */, NULL /* coderef_container */),
-	    "moment_admin");
-
-    parseSourcesConfigSection ();
-    parseChainsConfigSection ();
-    parseStreamsConfigSection ();
-
-    return Result::Success;
-}
-
 void
 MomentGstModule::parseSourcesConfigSection ()
 {
+    logD_ (_func_);
+
     MConfig::Config * const config = moment->getConfig();
 
     MConfig::Section * const src_section = config->getSection ("mod_gst/sources");
@@ -633,11 +323,11 @@ MomentGstModule::parseSourcesConfigSection ()
 
 	    logD_ (_func, "Stream name: ", stream_name, "; stream uri: ", stream_uri);
 
-	    createStream (stream_name,
-			  stream_uri,
-			  false /* chain */,
-			  false /* recording */,
-			  ConstMemory() /* record_filename */);
+	    createStreamChannel (stream_name,
+				 stream_uri,
+				 false /* chain */,
+				 false /* recording */,
+				 ConstMemory() /* record_filename */);
 	}
     }
 }
@@ -645,6 +335,8 @@ MomentGstModule::parseSourcesConfigSection ()
 void
 MomentGstModule::parseChainsConfigSection ()
 {
+    logD_ (_func_);
+
     MConfig::Config * const config = moment->getConfig();
 
 #if 0
@@ -709,11 +401,11 @@ MomentGstModule::parseChainsConfigSection ()
 	    ConstMemory const stream_name = chain_option->getName();
 	    ConstMemory const chain_spec = chain_option->getValue()->mem();
 
-	    createStream (stream_name,
-			  chain_spec,
-			  true /* chain */,
-			  false /* recording */,
-			  ConstMemory() /* record_filename */);
+	    createStreamChannel (stream_name,
+				 chain_spec,
+				 true /* chain */,
+				 false /* recording */,
+				 ConstMemory() /* record_filename */);
 	} else
 	if (section_entry->getType() == MConfig::SectionEntry::Type_Section) {
 	    MConfig::Section * const section = static_cast <MConfig::Section*> (section_entry);
@@ -771,11 +463,11 @@ MomentGstModule::parseChainsConfigSection ()
 		continue;
 	    }
 
-	    createStream (stream_name,
-			  chain_spec,
-			  true /* chain */,
-			  got_record_path /* recording */,
-			  record_path);
+	    createStreamChannel (stream_name,
+				 chain_spec,
+				 true /* chain */,
+				 got_record_path /* recording */,
+				 record_path);
 	}
     }
 }
@@ -783,6 +475,8 @@ MomentGstModule::parseChainsConfigSection ()
 void
 MomentGstModule::parseStreamsConfigSection ()
 {
+    logD_ (_func_);
+
     MConfig::Config * const config = moment->getConfig();
 
     MConfig::Section * const streams_section = config->getSection ("mod_gst/streams");
@@ -829,8 +523,10 @@ MomentGstModule::parseStreamsConfigSection ()
 		    }
 		}
 
-		if (num_set_opts > 1)
-		    logW_ (_func, "Only one of uri/chain/playlist should be specified for stream \"", stream_name, "\"");
+		if (num_set_opts > 1) {
+		    logW_ (_func, "Only one of uri/chain/playlist "
+			   "should be specified for stream \"", stream_name, "\"");
+		}
 	    }
 
 	    Ref<String> record_path;
@@ -841,30 +537,99 @@ MomentGstModule::parseStreamsConfigSection ()
 	    }
 
 	    if (chain && !chain->isNull()) {
-		createStream (stream_name,
-			      chain->mem(),
-			      true /* chain */,
-			      record_path ? true : false /* recording */,
-			      record_path ? record_path->mem() : ConstMemory());
+		createStreamChannel (stream_name,
+				     chain->mem(),
+				     true /* chain */,
+				     record_path ? true : false /* recording */,
+				     record_path ? record_path->mem() : ConstMemory());
 	    } else
 	    if (uri && !uri->isNull()) {
-		createStream (stream_name,
-			      uri->mem(),
-			      false /* chain */,
-			      record_path ? true : false /* recording */,
-			      record_path ? record_path->mem() : ConstMemory());
+		createStreamChannel (stream_name,
+				     uri->mem(),
+				     false /* chain */,
+				     record_path ? true : false /* recording */,
+				     record_path ? record_path->mem() : ConstMemory());
 	    } else
 	    if (playlist && !playlist->isNull()) {
 		logD_ (_func, "playlist: ", playlist);
-		createPlayback (stream_name,
-				playlist->mem(),
-				record_path ? true : false /* recording */,
-				record_path ? record_path->mem() : ConstMemory());
+		createPlaylistChannel (stream_name,
+				       playlist->mem(),
+				       record_path ? true : false /* recording */,
+				       record_path ? record_path->mem() : ConstMemory());
 	    } else {
 		logW_ (_func, "None of chain/uri/playlist specified for stream \"", stream_name, "\"");
 	    }
 	}
     }
+}
+
+// TODO Always succeeds currently.
+Result
+MomentGstModule::init (MomentServer * const moment)
+{
+    this->moment = moment;
+    this->timers = moment->getServerApp()->getTimers();
+    this->page_pool = moment->getPagePool();
+
+  // Opening video streams.
+
+    MConfig::Config * const config = moment->getConfig();
+
+    {
+	ConstMemory const opt_name = "mod_gst/send_metadata";
+	MConfig::Config::BooleanValue const val = config->getBoolean (opt_name);
+	if (val == MConfig::Config::Boolean_Invalid) {
+	    logE_ (_func, "Invalid value for ", opt_name, ": ", config->getString (opt_name));
+	    return Result::Failure;
+	}
+
+	if (val == MConfig::Config::Boolean_False) {
+	    send_metadata = false;
+	    logI_ (_func, "onMetaData messages will not be generated by mod_gst. "
+		   "Set \"", opt_name, "\" option to \"yes\" to enable sending of onMetaData messages.");
+	}
+    }
+
+    {
+	ConstMemory const opt_name = "mod_gst/width";
+	MConfig::GetResult const res = config->getUint64_default (
+		opt_name, &default_width, default_width);
+	if (!res) {
+	    logE_ (_func, "bad value for ", opt_name);
+	    return Result::Failure;
+	}
+    }
+
+    {
+	ConstMemory const opt_name = "mod_gst/height";
+	MConfig::GetResult const res = config->getUint64_default (
+		opt_name, &default_height,  default_height);
+	if (!res) {
+	    logE_ (_func, "bad value for ", opt_name);
+	    return Result::Failure;
+	}
+    }
+
+    {
+	ConstMemory const opt_name = "mod_gst/bitrate";
+	MConfig::GetResult const res = config->getUint64_default (
+		opt_name, &default_bitrate,  default_bitrate);
+	if (!res) {
+	    logE_ (_func, "bad value for ", opt_name);
+	    return Result::Failure;
+	}
+    }
+
+    moment->getAdminHttpService()->addHttpHandler (
+	    Cb<HttpService::HttpHandler> (
+		    &admin_http_handler, this /* cb_data */, NULL /* coderef_container */),
+	    "moment_admin");
+
+    parseSourcesConfigSection ();
+    parseChainsConfigSection ();
+    parseStreamsConfigSection ();
+
+    return Result::Success;
 }
 
 MomentGstModule::MomentGstModule()
@@ -883,33 +648,10 @@ MomentGstModule::~MomentGstModule ()
   StateMutexLock l (&mutex);
 
     {
-	ChannelHash::iter iter (channel_hash);
-	while (!channel_hash.iter_done (iter)) {
-	    Channel * const channel = channel_hash.iter_next (iter);
-	    channel->unref ();
-	}
-    }
-
-    {
-	StreamList::iter iter (stream_list);
-	while (!stream_list.iter_done (iter)) {
-	    GstStream * const stream = stream_list.iter_next (iter);
-	    stream->release ();
-	    stream->unref ();
-	}
-    }
-
-    {
-	PlaybackHash::iter iter (playback_hash);
-	while (!playback_hash.iter_done (iter)) {
-	    Playback * const playback = playback_hash.iter_next (iter);
-	    playback->mutex.lock ();
-	    if (playback->playback_timer) {
-		playback->timers->deleteTimer (playback->playback_timer);
-		playback->playback_timer = NULL;
-	    }
-	    playback->mutex.unlock ();
-	    playback->unref ();
+	ChannelEntryHash::iter iter (channel_entry_hash);
+	while (!channel_entry_hash.iter_done (iter)) {
+	    ChannelEntry * const channel_entry = channel_entry_hash.iter_next (iter);
+	    delete channel_entry;
 	}
     }
 }

@@ -19,7 +19,11 @@ moment_gst_private_headers =
 
 moment_gst_target_headers =	\
 	moment_gst_module.h	\
+	channel.h		\
+	recorder.h		\
 	gst_stream.h		\
+	gst_stream_ctl.h	\
+	playback.h		\
 	playlist.h
 
 moment_gst_includedir = $(includedir)/moment-gst-1.0/moment-gst
@@ -30,7 +34,11 @@ moment_gst_LTLIBRARIES = libmoment-gst-1.0.la
 libmoment_gst_1_0_la_SOURCES =	\
 	moment_gst_module.cpp	\
 	mod_gst.cpp		\
+	channel.cpp		\
+	recorder.cpp		\
 	gst_stream.cpp		\
+	gst_stream_ctl.cpp	\
+	playback.cpp		\
 	playlist.cpp
 
 moment_gst_extra_dist =
