@@ -20,6 +20,7 @@ moment_gst_private_headers =
 moment_gst_target_headers =	\
 	moment_gst_module.h	\
 	channel.h		\
+	channel_set.h		\
 	recorder.h		\
 	gst_stream.h		\
 	gst_stream_ctl.h	\
@@ -35,6 +36,7 @@ libmoment_gst_1_0_la_SOURCES =	\
 	moment_gst_module.cpp	\
 	mod_gst.cpp		\
 	channel.cpp		\
+	channel_set.cpp		\
 	recorder.cpp		\
 	gst_stream.cpp		\
 	gst_stream_ctl.cpp	\
