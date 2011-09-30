@@ -325,6 +325,28 @@ Playback::setSingleItem (ConstMemory const stream_spec,
     mutex.unlock ();
 }
 
+void
+Playback::setSingleChannelRecorder (ConstMemory const channel_name)
+{
+    logD_ (_func_);
+
+    mutex.lock ();
+    playlist.clear ();
+    playlist.setSingleChannelRecorder (channel_name);
+
+    next_item = playlist.getNextItem (NULL /* prv_item */,
+				      getUnixtime(),
+				      0 /* time_offset */,
+				      &next_start_rel,
+				      &next_seek,
+				      &next_duration,
+				      &next_duration_full);
+    got_next = true;
+
+    advancePlayback ();
+    mutex.unlock ();
+}
+
 Result
 Playback::loadPlaylistFile (ConstMemory   const filename,
 			    bool          const keep_cur_item,

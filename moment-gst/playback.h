@@ -108,6 +108,8 @@ public:
     void setSingleItem (ConstMemory stream_spec,
 			bool        is_chain);
 
+    void setSingleChannelRecorder (ConstMemory channel_name);
+
     Result loadPlaylistFile (ConstMemory  filename,
 			     bool         keep_cur_item,
 			     Ref<String> *ret_err_msg);
