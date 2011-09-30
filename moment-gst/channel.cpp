@@ -32,12 +32,11 @@ GstStreamCtl::Frontend Channel::gst_stream_ctl_frontend = {
 };
 
 void
-Channel::newVideoStream (void * const _advance_ticket,
+Channel::newVideoStream (void * const /* _advance_ticket */,
 			 void * const _self)
 {
     Channel * const self = static_cast <Channel*> (_self);
-  // TODO
-//    self->fireNewVideoStream (video_stream);
+    self->fireNewVideoStream ();
 }
 
 void
@@ -89,6 +88,7 @@ Channel::startPlaybackItem (Playlist::Item          * const item,
 	       "Ignoring the uri.");
     }
 
+    bool item_started = true;
     if (got_chain_spec) {
 	self->stream_ctl->beginVideoStream (item->chain_spec->mem(),
 					    true /* is_chain */,
@@ -105,6 +105,12 @@ Channel::startPlaybackItem (Playlist::Item          * const item,
     } else {
 	logW_ (_func, "Nor chain spec, no uri is specified for a playlist item.");
 	self->playback.advance (advance_ticket);
+	item_started = false;
+    }
+
+    if (item_started) {
+	logD_ (_func, "firing startItem");
+	self->fireStartItem ();
     }
 }
 
@@ -115,21 +121,50 @@ Channel::stopPlaybackItem (void * const _self)
 
     Channel * const self = static_cast <Channel*> (_self);
     self->stream_ctl->endVideoStream ();
+
+    self->fireStopItem ();
 }
 
 void
-Channel::fireNewVideoStream (VideoStream * const video_stream)
+Channel::informStartItem (ChannelEvents * const events,
+			  void          * const cb_data,
+			  void          * const /* inform_data */)
 {
-    new_video_stream_informer.informAll (informNewVideoStream, video_stream);
+    events->startItem (cb_data);
 }
 
 void
-Channel::informNewVideoStream (NewVideoStreamCallback   const cb,
-			       void                   * const cb_data,
-			       void                   * const _video_stream)
+Channel::informStopItem (ChannelEvents * const events,
+			 void          * const cb_data,
+			 void          * const /* inform_data */)
 {
-    VideoStream * const video_stream = static_cast <VideoStream*> (_video_stream);
-    cb (video_stream, cb_data);
+    events->stopItem (cb_data);
+}
+
+void
+Channel::informNewVideoStream (ChannelEvents * const events,
+			       void          * const cb_data,
+			       void          * const /* inform_data */)
+{
+    events->newVideoStream (cb_data);
+}
+
+void
+Channel::fireStartItem ()
+{
+    event_informer.informAll (informStartItem, NULL /* inform_data */);
+}
+
+void
+Channel::fireStopItem ()
+{
+    event_informer.informAll (informStopItem, NULL /* inform_data */);
+}
+
+void
+Channel::fireNewVideoStream ()
+{
+    event_informer.informAll (informNewVideoStream, NULL /* inform_data */);
 }
 
 mt_const void
@@ -141,7 +176,6 @@ Channel::init (MomentServer * const moment,
 	       Size           const default_bitrate)
 {
     playback.init (moment->getServerApp()->getTimers());
-
     playback.setFrontend (CbDesc<Playback::Frontend> (
 	    &playback_frontend, this /* cb_data */, this /* coderef_container */));
 
@@ -160,7 +194,7 @@ Channel::init (MomentServer * const moment,
 
 Channel::Channel ()
     : playback (this /* coderef_container */),
-      new_video_stream_informer (this, &mutex)
+      event_informer (this, &mutex)
 {
 }
 

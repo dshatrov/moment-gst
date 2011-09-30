@@ -35,8 +35,14 @@ using namespace Moment;
 class Channel : public Object
 {
 public:
-    typedef void (*NewVideoStreamCallback) (VideoStream *video_stream,
-					    void        *cb_data);
+    struct ChannelEvents
+    {
+	void (*startItem) (void *cb_data);
+
+	void (*stopItem) (void *cb_data);
+
+	void (*newVideoStream) (void *cb_data);
+    };
 
 private:
     mt_const Ref<String> channel_name;
@@ -45,7 +51,7 @@ private:
 
     Playback playback;
 
-    Informer<NewVideoStreamCallback> new_video_stream_informer;
+    Informer_<ChannelEvents> event_informer;
 
     mt_iface (GstStreamCtl::Frontend)
     mt_begin
@@ -77,11 +83,24 @@ private:
 
     mt_end
 
-    void fireNewVideoStream (VideoStream *video_stream);
+    static void informStartItem (ChannelEvents *events,
+				 void          *cb_data,
+				 void          *inform_data);
 
-    static void informNewVideoStream (NewVideoStreamCallback  cb,
-				      void                   *cb_data,
-				      void                   *_video_stream);
+    static void informStopItem (ChannelEvents *events,
+				void          *cb_data,
+				void          *inform_data);
+
+    static void informNewVideoStream (ChannelEvents *events,
+				      void          *cb_data,
+				      void          *inform_data);
+
+    void fireStartItem ();
+
+    void fireStopItem ();
+
+    void fireNewVideoStream ();
+
 
 public:
     Result setPosition_Id (ConstMemory const id,
@@ -102,7 +121,6 @@ public:
 	playback.setSingleItem (stream_spec, is_chain);
     }
 
-
     Result loadPlaylistFile (ConstMemory   const filename,
 			     bool          const keep_cur_item,
 			     Ref<String> * const ret_err_msg)
@@ -117,9 +135,9 @@ public:
 	return playback.loadPlaylistMem (mem, keep_cur_item, ret_err_msg);
     }
 
-    Informer<NewVideoStreamCallback>* getNewVideoStreamInformer ()
+    Informer_<ChannelEvents>* getEventInformer ()
     {
-	return &new_video_stream_informer;
+	return &event_informer;
     }
 
     mt_const void init (MomentServer *moment,
