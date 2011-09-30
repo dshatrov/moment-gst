@@ -25,6 +25,8 @@
 
 #include <moment-gst/gst_stream.h>
 #include <moment-gst/channel.h>
+#include <moment-gst/channel_set.h>
+#include <moment-gst/recorder.h>
 
 
 namespace MomentGst {
@@ -56,13 +58,26 @@ private:
 		  MemoryComparator<> >
 	    ChannelEntryHash;
 
-#if 0
-    class RecorderEntry : public IntrusiveListElement<>
+    class RecorderEntry : public HashEntry<>
     {
     public:
-	Ref<Recorder> recorder;
+	mt_const Ref<Recorder> recorder;
+
+	mt_const Ref<String> recorder_name;
+	mt_const Ref<String> playlist_filename;
     };
-#endif
+
+    typedef Hash< RecorderEntry,
+		  Memory,
+		  MemberExtractor< RecorderEntry,
+				   Ref<String>,
+				   &RecorderEntry::recorder_name,
+				   Memory,
+				   AccessorExtractor< String,
+						      Memory,
+						      &String::mem > >,
+		  MemoryComparator<> >
+	    RecorderEntryHash;
 
     mt_const MomentServer *moment;
     mt_const Timers *timers;
@@ -75,6 +90,9 @@ private:
     mt_const Uint64 default_bitrate;
 
     mt_mutex (mutex) ChannelEntryHash channel_entry_hash;
+    mt_mutex (mutex) RecorderEntryHash recorder_entry_hash;
+
+    ChannelSet channel_set;
 
     Result updatePlaylist (ConstMemory  channel_name,
 			   bool         keep_cur_item,
@@ -109,9 +127,18 @@ private:
 			      bool        recording,
 			      ConstMemory record_filename);
 
+    void createPlaylistRecorder (ConstMemory recorder_name,
+				 ConstMemory playlist_filename,
+				 ConstMemory filename_prefix);
+
+    void createChannelRecorder (ConstMemory recorder_name,
+				ConstMemory channel_name,
+				ConstMemory filename_prefix);
+
     void parseSourcesConfigSection ();
     void parseChainsConfigSection ();
     void parseStreamsConfigSection ();
+    void parseRecordingsConfigSection ();
 
 public:
     Result init (MomentServer *moment);

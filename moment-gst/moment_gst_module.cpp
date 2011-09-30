@@ -179,12 +179,16 @@ MomentGstModule::createPlaylistChannel (ConstMemory const channel_name,
     mutex.lock ();
     channel_entry_hash.add (channel_entry);
     mutex.unlock ();
+    channel_set.addChannel (channel, channel_name);
 
     {
 	Ref<String> err_msg;
 	if (!channel->loadPlaylistFile (playlist_filename, false /* keep_cur_item */, &err_msg))
 	    logE_ (_func, "Could not parse playlist file \"", playlist_filename, "\":\n", err_msg);
     }
+
+    if (recording)
+	createChannelRecorder (channel_name, channel_name, record_filename);
 }
 
 void
@@ -212,8 +216,66 @@ MomentGstModule::createStreamChannel (ConstMemory const channel_name,
     mutex.lock ();
     channel_entry_hash.add (channel_entry);
     mutex.unlock ();
+    channel_set.addChannel (channel, channel_name);
 
     channel->setSingleItem (stream_spec, is_chain);
+
+    if (recording)
+	createChannelRecorder (channel_name, channel_name, record_filename);
+}
+
+void
+MomentGstModule::createPlaylistRecorder (ConstMemory const recorder_name,
+					 ConstMemory const playlist_filename,
+					 ConstMemory const filename_prefix)
+{
+    RecorderEntry * const recorder_entry = new RecorderEntry;
+
+    recorder_entry->recorder_name = grab (new String (recorder_name));
+    recorder_entry->playlist_filename  = grab (new String (playlist_filename));
+
+    Ref<Recorder> const recorder = grab (new Recorder);
+    recorder_entry->recorder = recorder;
+
+    recorder->init (moment,
+		    page_pool,
+		    &channel_set,
+		    filename_prefix);
+
+    mutex.lock ();
+    recorder_entry_hash.add (recorder_entry);
+    mutex.unlock ();
+
+    {
+	Ref<String> err_msg;
+	if (!recorder->loadPlaylistFile (playlist_filename, false /* keep_cur_item */, &err_msg))
+	    logE_ (_func, "Could not parse recorder playlist file \"", playlist_filename, "\":\n", err_msg);
+    }
+}
+
+void
+MomentGstModule::createChannelRecorder (ConstMemory const recorder_name,
+					ConstMemory const channel_name,
+					ConstMemory const filename_prefix)
+{
+    RecorderEntry * const recorder_entry = new RecorderEntry;
+
+    recorder_entry->recorder_name = grab (new String (recorder_name));
+    recorder_entry->playlist_filename = NULL;
+
+    Ref<Recorder> const recorder = grab (new Recorder);
+    recorder_entry->recorder = recorder;
+
+    recorder->init (moment,
+		    page_pool,
+		    &channel_set,
+		    filename_prefix);
+
+    mutex.lock ();
+    recorder_entry_hash.add (recorder_entry);
+    mutex.unlock ();
+
+    recorder->setSingleChannel (channel_name);
 }
 
 HttpService::HttpHandler MomentGstModule::admin_http_handler = {
@@ -563,6 +625,75 @@ MomentGstModule::parseStreamsConfigSection ()
     }
 }
 
+void
+MomentGstModule::parseRecordingsConfigSection ()
+{
+    MConfig::Config * const config = moment->getConfig();
+
+    MConfig::Section * const recordings_section = config->getSection ("mod_gst/recordings");
+    if (!recordings_section)
+	return;
+
+    MConfig::Section::iter recordings_iter (*recordings_section);
+    while (!recordings_section->iter_done (recordings_iter)) {
+	MConfig::SectionEntry * const recorder_entry = recordings_section->iter_next (recordings_iter);
+	if (recorder_entry->getType() == MConfig::SectionEntry::Type_Section) {
+	    MConfig::Section* const recorder_section = static_cast <MConfig::Section*> (recorder_entry);
+
+	    ConstMemory const recorder_name = recorder_section->getName();
+	    if (!recorder_name.len())
+		logW_ (_func, "Unnamed recorder in section mod_gst/recordings");
+
+	    Ref<String> channel_name;
+	    Ref<String> playlist_filename;
+	    {
+		int num_set_opts = 0;
+
+		{
+		    MConfig::Option * const opt = recorder_section->getOption ("channel");
+		    if (opt && opt->getValue()) {
+			channel_name = opt->getValue()->getAsString();
+			++num_set_opts;
+		    }
+		}
+
+		{
+		    MConfig::Option * const opt = recorder_section->getOption ("playlist");
+		    if (opt && opt->getValue()) {
+			playlist_filename = opt->getValue()->getAsString();
+			++num_set_opts;
+		    }
+		}
+
+		if (num_set_opts > 1) {
+		    logW_ (_func, "Only one of channel/playlist "
+			   "should be specified for recorder \"", recorder_name, "\"");
+		}
+	    }
+
+	    Ref<String> record_path;
+	    {
+		MConfig::Option * const opt = recorder_section->getOption ("record_path");
+		if (opt && opt->getValue())
+		    record_path = opt->getValue()->getAsString();
+	    }
+
+	    if (channel_name && !channel_name->isNull()) {
+		createChannelRecorder (recorder_name,
+				       channel_name->mem(),
+				       record_path ? record_path->mem() : ConstMemory());
+	    } else
+	    if (playlist_filename && !playlist_filename->isNull()) {
+		createPlaylistRecorder (recorder_name,
+					playlist_filename->mem(),
+					record_path ? record_path->mem() : ConstMemory());
+	    } else {
+		logW_ (_func, "None of channel/playlist specified for recorder \"", recorder_name, "\"");
+	    }
+	}
+    }
+}
+
 // TODO Always succeeds currently.
 Result
 MomentGstModule::init (MomentServer * const moment)
@@ -628,6 +759,7 @@ MomentGstModule::init (MomentServer * const moment)
     parseSourcesConfigSection ();
     parseChainsConfigSection ();
     parseStreamsConfigSection ();
+    parseRecordingsConfigSection ();
 
     return Result::Success;
 }
@@ -652,6 +784,14 @@ MomentGstModule::~MomentGstModule ()
 	while (!channel_entry_hash.iter_done (iter)) {
 	    ChannelEntry * const channel_entry = channel_entry_hash.iter_next (iter);
 	    delete channel_entry;
+	}
+    }
+
+    {
+	RecorderEntryHash::iter iter (recorder_entry_hash);
+	while (!recorder_entry_hash.iter_done (iter)) {
+	    RecorderEntry * const recorder_entry = recorder_entry_hash.iter_next (iter);
+	    delete recorder_entry;
 	}
     }
 }
