@@ -664,6 +664,14 @@ Playlist::setSingleItem (ConstMemory const stream_spec,
     item_list.append (item);
 }
 
+void
+Playlist::setSingleChannelRecorder (ConstMemory const channel_name)
+{
+    Item * const item = new Item;
+    item->id = grab (new String (channel_name));
+    item_list.append (item);
+}
+
 mt_throws Result
 Playlist::parsePlaylistFile (ConstMemory   const filename,
 			     Ref<String> * const ret_err_msg)

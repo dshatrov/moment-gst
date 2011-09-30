@@ -126,6 +126,8 @@ public:
     void setSingleItem (ConstMemory stream_spec,
 			bool        is_chain);
 
+    void setSingleChannelRecorder (ConstMemory channel_name);
+
     mt_throws Result parsePlaylistFile (ConstMemory  filename,
 					Ref<String> *ret_err_msg);
 
