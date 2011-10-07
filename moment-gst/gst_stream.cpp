@@ -592,6 +592,7 @@ dumpBufferFlags (GstBuffer * const buffer)
 	flags ^= GST_BUFFER_FLAG_DELTA_UNIT;
     }
 
+#if 0
     if (GST_BUFFER_FLAG_IS_SET (buffer, GST_BUFFER_FLAG_MEDIA1)) {
 	logD_ (_func, "GST_BUFFER_FLAG_MEDIA1");
 	flags ^= GST_BUFFER_FLAG_MEDIA1;
@@ -606,6 +607,7 @@ dumpBufferFlags (GstBuffer * const buffer)
 	logD_ (_func, "GST_BUFFER_FLAG_MEDIA3");
 	flags ^= GST_BUFFER_FLAG_MEDIA3;
     }
+#endif
 
     if (flags)
 	logD_ (_func, "Extra flags: 0x", fmt_hex, flags);
@@ -642,6 +644,9 @@ gstStateToString (GstState const state)
 void
 GstStream::doAudioData (GstBuffer * const buffer)
 {
+    // TODO Update current time efficiently.
+    updateTime ();
+
     logD_ (_func, "stream 0x", fmt_hex, (UintPtr) this, ", "
 	   "timestamp 0x", fmt_hex, GST_BUFFER_TIMESTAMP (buffer), ", "
 	   "flags 0x", fmt_hex, GST_BUFFER_FLAGS (buffer), ", "
@@ -650,9 +655,6 @@ GstStream::doAudioData (GstBuffer * const buffer)
 
     if (GST_BUFFER_FLAG_IS_SET (buffer, GST_BUFFER_FLAG_IN_CAPS))
 	hexdump (logs, ConstMemory (GST_BUFFER_DATA (buffer), GST_BUFFER_SIZE (buffer)));
-
-    // TODO Update current time efficiently.
-    updateTime ();
 
     mutex.lock ();
 
@@ -843,6 +845,7 @@ GstStream::doAudioData (GstBuffer * const buffer)
 	} else {
 	  // Waiting for the first video frame.
 	    while (got_video && first_video_frame)
+		// TODO FIXME This is a perfect way to hang up a thread.
 		metadata_reported_cond.wait (mutex);
 	}
     }
@@ -856,7 +859,7 @@ GstStream::doAudioData (GstBuffer * const buffer)
 	}
 
 //	if (initial_play_pending && !play_pending) {
-	if (initial_seek_pending) {
+	if (initial_seek_pending && initial_seek > 0) {
 	    // We have not started playing yet. This is most likely a preroll frame.
 	    logD_ (_func, "Skipping an early preroll frame");
 	    skip_frame = true;
@@ -1015,6 +1018,9 @@ GstStream::handoffAudioDataCb (GstElement * const /* element */,
 void
 GstStream::doVideoData (GstBuffer * const buffer)
 {
+    // TODO Update current time efficiently.
+    updateTime ();
+
     logD_ (_func, "stream 0x", fmt_hex, (UintPtr) this, ", "
 	   "timestamp 0x", fmt_hex, GST_BUFFER_TIMESTAMP (buffer), ", "
 	   "flags 0x", fmt_hex, GST_BUFFER_FLAGS (buffer));
@@ -1022,9 +1028,6 @@ GstStream::doVideoData (GstBuffer * const buffer)
 
     if (GST_BUFFER_FLAG_IS_SET (buffer, GST_BUFFER_FLAG_PREROLL))
 	logD_ (_func, "preroll buffer");
-
-    // TODO Update current time efficiently.
-    updateTime ();
 
     mutex.lock ();
 
@@ -1089,6 +1092,7 @@ GstStream::doVideoData (GstBuffer * const buffer)
 	} else {
 	  // Waiting for the first audio frame.
 	    while (got_audio && first_audio_frame)
+		// TODO FIXME This is a perfect way to hang up a thread.
 		metadata_reported_cond.wait (mutex);
 	}
     }
@@ -1102,7 +1106,7 @@ GstStream::doVideoData (GstBuffer * const buffer)
 	}
 
 //	if (initial_play_pending && !play_pending) {
-	if (initial_seek_pending) {
+	if (initial_seek_pending && initial_seek > 0) {
 	    // We have not started playing yet. This is most likely a preroll frame.
 	    logD_ (_func, "Skipping an early preroll frame");
 	    skip_frame = true;
