@@ -177,7 +177,7 @@ Recorder::newVideoStream (void * const _recording)
 	Ref<VideoStream> const video_stream = self->moment->getVideoStream (self->cur_channel_name->mem());
 	if (video_stream) {
 	    Ref<VideoStream> const cur_video_stream = self->weak_cur_video_stream.getRef ();
-	    if (cur_video_stream && cur_video_stream == video_stream) {
+	    if (cur_video_stream && cur_video_stream == video_stream.ptr()) {
 	      // Video stream has not changed.
 		self->mutex.unlock ();
 		return;
