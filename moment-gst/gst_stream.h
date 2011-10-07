@@ -75,6 +75,7 @@ private:
 
       Time initial_seek;
       bool initial_seek_pending;
+      bool initial_play_pending;
 
       RtmpServer::MetaData metadata;
       Cond metadata_reported_cond;
@@ -93,6 +94,7 @@ private:
 
       bool first_audio_frame;
       Count audio_skip_counter;
+      Count video_skip_counter;
 
       bool first_video_frame;
 
@@ -103,6 +105,13 @@ private:
       bool changing_state_to_playing;
 
       bool reporting_status_events;
+
+      // If 'true', then a seek to 'initial_seek' position should be initiated
+      // in reportStatusEvents().
+      bool seek_pending;
+      // If 'true', then the pipeline should be set to PLAYING state
+      // in reportStatusEvents().
+      bool play_pending;
 
       // No "no_video" notifications should be made after error or eos
       // notification for the same GstStream instance.

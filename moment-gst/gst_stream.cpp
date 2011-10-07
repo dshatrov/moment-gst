@@ -26,7 +26,7 @@ using namespace Moment;
 namespace MomentGst {
 
 namespace {
-LogGroup libMary_logGroup_bus ("moment-gst_bus", LogLevel::I);
+LogGroup libMary_logGroup_bus ("moment-gst_bus", LogLevel::D);
 }
 
 void
@@ -429,8 +429,9 @@ GstStream::setPipelinePlaying ()
 	gst_object_unref (bus);
     }
 
-    if (gst_element_set_state (chain_el, GST_STATE_PLAYING) == GST_STATE_CHANGE_FAILURE) {
-	logE_ (_func, "gst_element_set_state() failed (PLAYING)");
+    logD_ (_func, "Setting pipeline state to PAUSED");
+    if (gst_element_set_state (chain_el, GST_STATE_PAUSED) == GST_STATE_CHANGE_FAILURE) {
+	logE_ (_func, "gst_element_set_state() failed (PAUSED)");
 	goto _failure;
     }
 
@@ -439,6 +440,7 @@ GstStream::setPipelinePlaying ()
     if (stream_closed) {
         mutex.unlock ();
 
+	logD_ (_func, "Setting pipeline state to NULL");
 	if (gst_element_set_state (chain_el, GST_STATE_NULL) == GST_STATE_CHANGE_FAILURE)
 	    logE_ (_func, "gst_element_set_state() failed (NULL)");
 
@@ -451,6 +453,7 @@ GstStream::setPipelinePlaying ()
     return Result::Success;
 
 _failure:
+    logD_ (_func, "Setting pipeline state to NULL");
     if (gst_element_set_state (chain_el, GST_STATE_NULL) == GST_STATE_CHANGE_FAILURE)
 	logE_ (_func, "gst_element_set_state() failed (NULL #2)");
 
@@ -481,6 +484,7 @@ GstStream::pipelineCreationFailed ()
 
     if (tmp_playbin) {
 	// Extra transition to NULL state for extra safety.
+	logD_ (_func, "Setting pipeline state to NULL");
 	if (gst_element_set_state (tmp_playbin, GST_STATE_NULL) == GST_STATE_CHANGE_FAILURE)
 	    logE_ (_func, "gst_element_set_state() failed (NULL)");
 
@@ -510,6 +514,7 @@ GstStream::releasePipeline ()
 
     if (tmp_playbin) {
 	if (to_null_state) {
+	    logD_ (_func, "Setting pipeline state to NULL");
 	    if (gst_element_set_state (tmp_playbin, GST_STATE_NULL) == GST_STATE_CHANGE_FAILURE)
 		logE_ (_func, "gst_element_set_state() failed (NULL)");
 	}
@@ -543,11 +548,108 @@ GstStream::reportMetaData ()
     page_pool->msgUnref (msg.page_list.first);
 }
 
+static void
+dumpBufferFlags (GstBuffer * const buffer)
+{
+    Uint32 flags = (Uint32) GST_BUFFER_FLAGS (buffer);
+    if (flags != GST_BUFFER_FLAGS (buffer))
+	logD_ (_func, "flags do not fit into Uint32");
+
+    if (GST_BUFFER_FLAG_IS_SET (buffer, GST_BUFFER_FLAG_READONLY)) {
+	logD_ (_func, "GST_BUFFER_FLAG_READONLY");
+	flags ^= GST_BUFFER_FLAG_READONLY;
+    }
+
+#if 0
+    if (GST_BUFFER_FLAG_IS_SET (buffer, GST_BUFFER_FLAG_MEDIA4)) {
+	logD_ (_func, "GST_BUFFER_FLAG_MEDIA4");
+	flags ^= GST_BUFFER_FLAG_MEDIA4;
+    }
+#endif
+
+    if (GST_BUFFER_FLAG_IS_SET (buffer, GST_BUFFER_FLAG_PREROLL)) {
+	logD_ (_func, "GST_BUFFER_FLAG_PREROLL");
+	flags ^= GST_BUFFER_FLAG_PREROLL;
+    }
+
+    if (GST_BUFFER_FLAG_IS_SET (buffer, GST_BUFFER_FLAG_DISCONT)) {
+	logD_ (_func, "GST_BUFFER_FLAG_DISCONT");
+	flags ^= GST_BUFFER_FLAG_DISCONT;
+    }
+
+    if (GST_BUFFER_FLAG_IS_SET (buffer, GST_BUFFER_FLAG_IN_CAPS)) {
+	logD_ (_func, "GST_BUFFER_FLAG_IN_CAPS");
+	flags ^= GST_BUFFER_FLAG_IN_CAPS;
+    }
+
+    if (GST_BUFFER_FLAG_IS_SET (buffer, GST_BUFFER_FLAG_GAP)) {
+	logD_ (_func, "GST_BUFFER_FLAG_GAP");
+	flags ^= GST_BUFFER_FLAG_GAP;
+    }
+
+    if (GST_BUFFER_FLAG_IS_SET (buffer, GST_BUFFER_FLAG_DELTA_UNIT)) {
+	logD_ (_func, "GST_BUFFER_FLAG_DELTA_UNIT");
+	flags ^= GST_BUFFER_FLAG_DELTA_UNIT;
+    }
+
+    if (GST_BUFFER_FLAG_IS_SET (buffer, GST_BUFFER_FLAG_MEDIA1)) {
+	logD_ (_func, "GST_BUFFER_FLAG_MEDIA1");
+	flags ^= GST_BUFFER_FLAG_MEDIA1;
+    }
+
+    if (GST_BUFFER_FLAG_IS_SET (buffer, GST_BUFFER_FLAG_MEDIA2)) {
+	logD_ (_func, "GST_BUFFER_FLAG_MEDIA2");
+	flags ^= GST_BUFFER_FLAG_MEDIA2;
+    }
+
+    if (GST_BUFFER_FLAG_IS_SET (buffer, GST_BUFFER_FLAG_MEDIA3)) {
+	logD_ (_func, "GST_BUFFER_FLAG_MEDIA3");
+	flags ^= GST_BUFFER_FLAG_MEDIA3;
+    }
+
+    if (flags)
+	logD_ (_func, "Extra flags: 0x", fmt_hex, flags);
+}
+
+static Ref<String>
+gstStateToString (GstState const state)
+{
+    ConstMemory mem;
+
+    switch (state) {
+	case GST_STATE_VOID_PENDING:
+	    mem = "VOID_PENDING";
+	    break;
+	case GST_STATE_NULL:
+	    mem = "NULL";
+	    break;
+	case GST_STATE_READY:
+	    mem = "READY";
+	    break;
+	case GST_STATE_PAUSED:
+	    mem = "PAUSED";
+	    break;
+	case GST_STATE_PLAYING:
+	    mem = "PLAYING";
+	    break;
+	default:
+	    mem = "Unknown";
+    }
+
+    return grab (new String (mem));
+}
+
 void
 GstStream::doAudioData (GstBuffer * const buffer)
 {
-//    logD_ (_func, "stream 0x", fmt_hex, (UintPtr) stream, ", "
-//	   "timestamp 0x", fmt_hex, GST_BUFFER_TIMESTAMP (buffer));
+    logD_ (_func, "stream 0x", fmt_hex, (UintPtr) this, ", "
+	   "timestamp 0x", fmt_hex, GST_BUFFER_TIMESTAMP (buffer), ", "
+	   "flags 0x", fmt_hex, GST_BUFFER_FLAGS (buffer), ", "
+	   "size: ", fmt_def, GST_BUFFER_SIZE (buffer));
+    dumpBufferFlags (buffer);
+
+    if (GST_BUFFER_FLAG_IS_SET (buffer, GST_BUFFER_FLAG_IN_CAPS))
+	hexdump (logs, ConstMemory (GST_BUFFER_DATA (buffer), GST_BUFFER_SIZE (buffer)));
 
     // TODO Update current time efficiently.
     updateTime ();
@@ -563,7 +665,10 @@ GstStream::doAudioData (GstBuffer * const buffer)
     }
     prv_audio_timestamp = GST_BUFFER_TIMESTAMP (buffer);
 
-    GstBuffer *aac_codec_data_buffer = NULL;
+    VideoStream::AudioFrameType codec_data_type = VideoStream::AudioFrameType::Unknown;
+    GstBuffer *codec_data_buffers [2];
+    Count num_codec_data_buffers = 0;
+//    GstBuffer *aac_codec_data_buffer = NULL;
     if (first_audio_frame) {
 	GstCaps * const caps = gst_buffer_get_caps (buffer);
 	{
@@ -637,8 +742,13 @@ GstStream::doAudioData (GstBuffer * const buffer)
 			break;
 		    }
 
+#if 0
 		    aac_codec_data_buffer = gst_value_get_buffer (val);
 		    logD_ (_func, "aac_codec_data_buffer: 0x", fmt_hex, (UintPtr) aac_codec_data_buffer);
+#endif
+		    codec_data_type = VideoStream::AudioFrameType::AacSequenceHeader;
+		    codec_data_buffers [0] = gst_value_get_buffer (val);
+		    num_codec_data_buffers = 1;
 		} while (0);
 	    }
 	} else
@@ -646,6 +756,39 @@ GstStream::doAudioData (GstBuffer * const buffer)
 	  // Speex
 	    audio_codec_id = VideoStream::AudioCodecId::Speex;
 	    audio_hdr = 0xb6; // Speex, 11 kHz, 16-bit samples, mono
+
+	    do {
+	      // Processing Speex stream headers.
+
+		GValue const * const val = gst_structure_get_value (structure, "streamheader");
+		if (!val) {
+		    logW_ (_func, "Speex streamheader not found");
+		    break;
+		}
+
+		if (!GST_VALUE_HOLDS_ARRAY (val)) {
+		    logW_ (_func, "streamheader doesn't hold an array");
+		    break;
+		}
+
+		codec_data_type = VideoStream::AudioFrameType::SpeexHeader;
+
+		guint const arr_size = gst_value_array_get_size (val);
+		for (guint i = 0; i < arr_size; ++i) {
+		    GValue const * const elem_val = gst_value_array_get_value (val, i);
+		    if (!elem_val) {
+			logW_ (_func, "Speex streamheader: NULL array element #", i);
+		    } else
+		    if (!GST_VALUE_HOLDS_BUFFER (elem_val)) {
+			logW_ (_func, "Speex streamheader element #", i, " doesn't hold a buffer");
+		    } else {
+			codec_data_buffers [i] = gst_value_get_buffer (elem_val);
+			++num_codec_data_buffers;
+		    }
+		}
+
+		logD_ (_func, "Speex streamheader: num_codec_data_buffers: ", num_codec_data_buffers);
+	    } while (0);
 	} else
 	if (equal (structure_name_mem, "audio/x-nellymoser")) {
 	  // Nellymoser
@@ -704,27 +847,27 @@ GstStream::doAudioData (GstBuffer * const buffer)
 	}
     }
 
-    if (audio_codec_id == VideoStream::AudioCodecId::Speex) {
-	// The first two buffers for Speex are headers. They do appear to contain
-	// audio data and their timestamps look random (very large).
+    bool skip_frame = false;
+    {
 	if (audio_skip_counter > 0) {
 	    --audio_skip_counter;
-	    mutex.unlock ();
-	    logD_ (_func, "skipping initial audio frame, ", audio_skip_counter, " left");
-	    return;
+	    logD_ (_func, "Skipping audio frame, audio_skip_counter: ", audio_skip_counter, " left");
+	    skip_frame = true;
 	}
 
-	if (GST_BUFFER_TIMESTAMP (buffer) == (GstClockTime) -1) {
-	    mutex.unlock ();
-	    logD_ (_func, "\"-1\" timestamp, skipping frame");
-	    return;
+//	if (initial_play_pending && !play_pending) {
+	if (initial_seek_pending) {
+	    // We have not started playing yet. This is most likely a preroll frame.
+	    logD_ (_func, "Skipping an early preroll frame");
+	    skip_frame = true;
 	}
     }
 
+    if (GST_BUFFER_FLAG_IS_SET (buffer, GST_BUFFER_FLAG_IN_CAPS))
+	skip_frame = true;
+
     VideoStream::AudioCodecId const tmp_audio_codec_id = audio_codec_id;
     Byte const tmp_audio_hdr = audio_hdr;
-//    logD_ (_func, "audio_hdr: ", fmt_hex, tmp_audio_hdr);
-
     mutex.unlock ();
 
     if (tmp_audio_codec_id == VideoStream::AudioCodecId::Unknown) {
@@ -732,54 +875,63 @@ GstStream::doAudioData (GstBuffer * const buffer)
 	return;
     }
 
-    if (aac_codec_data_buffer) {
-      // Reporting AAC codec data if needed.
+    if (num_codec_data_buffers > 0) {
+      // Reporting codec data if needed.
 
-	Size msg_len = 0;
+	for (Size i = 0; i < num_codec_data_buffers; ++i) {
+	    Size msg_len = 0;
 
-	PagePool::PageListHead page_list;
-	RtmpConnection::PrechunkContext prechunk_ctx;
+	    PagePool::PageListHead page_list;
+	    RtmpConnection::PrechunkContext prechunk_ctx;
 
-	Uint64 const timestamp = (Uint64) (GST_BUFFER_TIMESTAMP (aac_codec_data_buffer) / 1000000);
-	Byte aac_audio_hdr [2] = { tmp_audio_hdr, 0 };
+	    Uint64 const timestamp = (Uint64) (GST_BUFFER_TIMESTAMP (codec_data_buffers [i]) / 1000000);
+	    Byte msg_audio_hdr [2] = { tmp_audio_hdr, 0 };
+	    Size msg_audio_hdr_len = 1;
+	    if (codec_data_type == VideoStream::AudioFrameType::AacSequenceHeader)
+		msg_audio_hdr_len = 2;
 
-	RtmpConnection::fillPrechunkedPages (&prechunk_ctx,
-					     ConstMemory::forObject (aac_audio_hdr),
-					     page_pool,
-					     &page_list,
-					     RtmpConnection::DefaultAudioChunkStreamId,
-					     timestamp,
-					     true /* first_chunk */);
-	msg_len += sizeof (aac_audio_hdr);
+	    RtmpConnection::fillPrechunkedPages (&prechunk_ctx,
+						 ConstMemory (msg_audio_hdr, msg_audio_hdr_len),
+						 page_pool,
+						 &page_list,
+						 RtmpConnection::DefaultAudioChunkStreamId,
+						 timestamp,
+						 true /* first_chunk */);
+	    msg_len += msg_audio_hdr_len;
 
-	logD_ (_func, "AAC SEQUENCE HEADER");
-	hexdump (logs, ConstMemory (GST_BUFFER_DATA (aac_codec_data_buffer), GST_BUFFER_SIZE (aac_codec_data_buffer)));
+	    logD_ (_func, "CODEC DATA");
+	    hexdump (logs, ConstMemory (GST_BUFFER_DATA (codec_data_buffers [i]), GST_BUFFER_SIZE (codec_data_buffers [i])));
 
-	RtmpConnection::fillPrechunkedPages (&prechunk_ctx,
-					     ConstMemory (GST_BUFFER_DATA (aac_codec_data_buffer),
-							  GST_BUFFER_SIZE (aac_codec_data_buffer)),
-					     page_pool,
-					     &page_list,
-					     RtmpConnection::DefaultAudioChunkStreamId,
-					     timestamp,
-					     false /* first_chunk */);
-	msg_len += GST_BUFFER_SIZE (aac_codec_data_buffer);
+	    RtmpConnection::fillPrechunkedPages (&prechunk_ctx,
+						 ConstMemory (GST_BUFFER_DATA (codec_data_buffers [i]),
+							      GST_BUFFER_SIZE (codec_data_buffers [i])),
+						 page_pool,
+						 &page_list,
+						 RtmpConnection::DefaultAudioChunkStreamId,
+						 timestamp,
+						 false /* first_chunk */);
+	    msg_len += GST_BUFFER_SIZE (codec_data_buffers [i]);
 
-	VideoStream::AudioMessage msg;
-	msg.timestamp = timestamp;
-	msg.prechunk_size = RtmpConnection::PrechunkSize;
-	msg.frame_type = VideoStream::AudioFrameType::AacSequenceHeader;
-	msg.codec_id = tmp_audio_codec_id;
+	    VideoStream::AudioMessage msg;
+//	    msg.timestamp = timestamp;
+	    msg.timestamp = 0;
+	    msg.prechunk_size = RtmpConnection::PrechunkSize;
+	    msg.frame_type = codec_data_type;
+	    msg.codec_id = tmp_audio_codec_id;
 
-	msg.page_pool = page_pool;
-	msg.page_list = page_list;
-	msg.msg_len = msg_len;
-	msg.msg_offset = 0;
+	    msg.page_pool = page_pool;
+	    msg.page_list = page_list;
+	    msg.msg_len = msg_len;
+	    msg.msg_offset = 0;
 
-	video_stream->fireAudioMessage (&msg);
+	    video_stream->fireAudioMessage (&msg);
 
-	page_pool->msgUnref (page_list.first);
+	    page_pool->msgUnref (page_list.first);
+	}
     }
+
+    if (skip_frame)
+	return;
 
     Size msg_len = 0;
 
@@ -863,8 +1015,13 @@ GstStream::handoffAudioDataCb (GstElement * const /* element */,
 void
 GstStream::doVideoData (GstBuffer * const buffer)
 {
-//    logD_ (_func, "stream 0x", fmt_hex, (UintPtr) this, ", "
-//	   "timestamp 0x", fmt_hex, GST_BUFFER_TIMESTAMP (buffer));
+    logD_ (_func, "stream 0x", fmt_hex, (UintPtr) this, ", "
+	   "timestamp 0x", fmt_hex, GST_BUFFER_TIMESTAMP (buffer), ", "
+	   "flags 0x", fmt_hex, GST_BUFFER_FLAGS (buffer));
+    dumpBufferFlags (buffer);
+
+    if (GST_BUFFER_FLAG_IS_SET (buffer, GST_BUFFER_FLAG_PREROLL))
+	logD_ (_func, "preroll buffer");
 
     // TODO Update current time efficiently.
     updateTime ();
@@ -899,7 +1056,7 @@ GstStream::doVideoData (GstBuffer * const buffer)
 	   video_hdr = 0x07; // AVC
 
 	   do {
-	     // Processing AvcSeqienceHeader
+	     // Processing AvcSequenceHeader
 
 	       GValue const * const val = gst_structure_get_value (st, "codec_data");
 	       if (!val) {
@@ -933,6 +1090,22 @@ GstStream::doVideoData (GstBuffer * const buffer)
 	  // Waiting for the first audio frame.
 	    while (got_audio && first_audio_frame)
 		metadata_reported_cond.wait (mutex);
+	}
+    }
+
+    bool skip_frame = false;
+    {
+	if (video_skip_counter > 0) {
+	    --video_skip_counter;
+	    logD_ (_func, "Skipping video frame, video_skip_counter: ", video_skip_counter);
+	    skip_frame = true;
+	}
+
+//	if (initial_play_pending && !play_pending) {
+	if (initial_seek_pending) {
+	    // We have not started playing yet. This is most likely a preroll frame.
+	    logD_ (_func, "Skipping an early preroll frame");
+	    skip_frame = true;
 	}
     }
 
@@ -990,6 +1163,9 @@ GstStream::doVideoData (GstBuffer * const buffer)
 
 	page_pool->msgUnref (page_list.first);
     }
+
+    if (skip_frame)
+	return;
 
     Size msg_len = 0;
 
@@ -1128,30 +1304,64 @@ GstStream::busSyncHandler (GstBus     * const /* bus */,
 
 	switch (GST_MESSAGE_TYPE (msg)) {
 	    case GST_MESSAGE_STATE_CHANGED: {
-		GstState new_state,
+		GstState old_state,
+			 new_state,
 			 pending_state;
-		gst_message_parse_state_changed (msg, NULL, &new_state, &pending_state);
+		gst_message_parse_state_changed (msg, &old_state, &new_state, &pending_state);
+		logD_ (_func, "STATE_CHANGED from ", gstStateToString (old_state), " "
+		       "to ", gstStateToString (new_state), ", "
+		       "pending state: ", gstStateToString (pending_state));
 		if (pending_state == GST_STATE_VOID_PENDING) {
 		    if (new_state == GST_STATE_PAUSED) {
 			logD (bus, _func, "PAUSED");
-		    } else
-		    if (new_state == GST_STATE_PLAYING) {
-			logD (bus, _func, "PLAYING");
 
+#if 0
 			bool do_seek = false;
 			Time initial_seek = self->initial_seek;
 			if (self->initial_seek_pending) {
 			    self->initial_seek_pending = false;
 			    do_seek = true;
 			}
+#endif
 
+			if (self->initial_seek_pending) {
+			    self->initial_seek_pending = false;
+			    if (self->initial_seek > 0) {
+				self->seek_pending = true;
+			    } else {
+				if (self->initial_play_pending) {
+				    self->initial_play_pending = false;
+				    self->play_pending = true;
+				}
+			    }
+			} else {
+			    if (self->initial_play_pending) {
+				self->initial_play_pending = false;
+				self->play_pending = true;
+			    }
+			}
+
+			self->mutex.unlock ();
+
+			if (self->frontend)
+			    self->frontend.call (self->frontend->statusEvent);
+
+			goto _return;
+
+#if 0
+#if 0
 			GstElement * const tmp_playbin = self->playbin;
 			gst_object_ref (tmp_playbin);
+#endif
 			self->mutex.unlock ();
 
 			// TODO This looks like a minor race. Another seek may be requested
 			//      at the same time.
 			if (do_seek && initial_seek > 0) {
+			    seek_pending = true;
+//			    goto _return;
+#if 0
+			    logD_ (_func, "Calling gst_element_seek_simple()");
 			    if (!gst_element_seek_simple (tmp_playbin,
 							  GST_FORMAT_TIME,
 							  (GstSeekFlags) (GST_SEEK_FLAG_FLUSH | GST_SEEK_FLAG_KEY_UNIT),
@@ -1159,10 +1369,23 @@ GstStream::busSyncHandler (GstBus     * const /* bus */,
 			    {
 				logE_ (_func, "Seek failed");
 			    }
+			    logD_ (_func, "gst_element_seek_simple() returned");
+#endif
+			} else {
+			    play_pending = true;
 			}
 
+#if 0
+			if (gst_element_set_state (tmp_playbin, GST_STATE_PLAYING) == GST_STATE_CHANGE_FAILURE)
+			    logE_ (_func, "gst_element_set_state() failed (PLAYING)");
+
 			gst_object_unref (tmp_playbin);
+#endif
 			goto _return;
+#endif
+		    } else
+		    if (new_state == GST_STATE_PLAYING) {
+			logD (bus, _func, "PLAYING");
 		    }
 		}
 	    } break;
@@ -1245,6 +1468,8 @@ GstStream::createPipeline ()
 void
 GstStream::reportStatusEvents ()
 {
+    logD_ (_func_);
+
     mutex.lock ();
     if (reporting_status_events) {
 	mutex.unlock ();
@@ -1252,16 +1477,21 @@ GstStream::reportStatusEvents ()
     }
     reporting_status_events = true;
 
-    while (eos_pending   ||
-	   error_pending ||
-	   no_video_pending)
+    while (eos_pending      ||
+	   error_pending    ||
+	   no_video_pending ||
+	   seek_pending     ||
+	   play_pending)
     {
 	if (close_notified) {
+	    logD_ (_func, "close_notified");
+
 	    mutex.unlock ();
 	    return;
 	}
 
 	if (eos_pending) {
+	    logD_ (_func, "eos_pending");
 	    eos_pending = false;
 	    close_notified = true;
 
@@ -1269,8 +1499,12 @@ GstStream::reportStatusEvents ()
 		logD_ (_func, "firing EOS");
 		mt_unlocks_locks (mutex) frontend.call_mutex (frontend->eos, mutex);
 	    }
-	} else
+
+	    break;
+	}
+
 	if (error_pending) {
+	    logD_ (_func, "error_pending");
 	    error_pending = false;
 	    close_notified = true;
 
@@ -1278,22 +1512,81 @@ GstStream::reportStatusEvents ()
 		logD_ (_func, "firing ERROR");
 		mt_unlocks_locks (mutex) frontend.call_mutex (frontend->error, mutex);
 	    }
-	} else
+
+	    break;
+	}
+
 	if (no_video_pending) {
+	    logD_ (_func, "no_video_pending");
+	    no_video_pending = false;
 	    if (stream_closed) {
 		mutex.unlock ();
 		return;
 	    }
-
-	    no_video_pending = false;
 
 	    if (frontend) {
 		logD_ (_func, "firing NO_VIDEO");
 		mt_unlocks_locks (mutex) frontend.call_mutex (frontend->noVideo, mutex);
 	    }
 	}
+
+	if (seek_pending) {
+	    logD_ (_func, "seek_pending");
+	    assert (!play_pending);
+	    seek_pending = false;
+	    if (stream_closed) {
+		mutex.unlock ();
+		return;
+	    }
+
+	    if (initial_seek > 0) {
+		Time const tmp_initial_seek = initial_seek;
+		GstElement * const tmp_playbin = playbin;
+		gst_object_ref (tmp_playbin);
+		mutex.unlock ();
+
+		bool seek_failed = false;
+		if (!gst_element_seek_simple (tmp_playbin,
+					      GST_FORMAT_TIME,
+					      (GstSeekFlags) (GST_SEEK_FLAG_FLUSH | GST_SEEK_FLAG_KEY_UNIT),
+					      (GstClockTime) tmp_initial_seek * 1000000000LL))
+		{
+		    seek_failed = true;
+		    logE_ (_func, "Seek failed");
+		}
+
+		gst_object_unref (tmp_playbin);
+		mutex.lock ();
+		if (seek_failed)
+		    play_pending = true;
+	    } else {
+		play_pending = true;
+	    }
+	}
+
+	if (play_pending) {
+	    logD_ (_func, "play_pending");
+	    assert (!seek_pending);
+	    play_pending = false;
+	    if (stream_closed) {
+		mutex.unlock ();
+		return;
+	    }
+
+	    GstElement * const tmp_playbin = playbin;
+	    gst_object_ref (tmp_playbin);
+	    mutex.unlock ();
+
+	    logD_ (_func, "Setting pipeline state to PLAYING");
+	    if (gst_element_set_state (tmp_playbin, GST_STATE_PLAYING) == GST_STATE_CHANGE_FAILURE)
+		logE_ (_func, "gst_element_set_state() failed (PLAYING)");
+
+	    gst_object_unref (tmp_playbin);
+	    mutex.lock ();
+	}
     }
 
+    logD_ (_func, "done");
     reporting_status_events = false;
     mutex.unlock ();
 }
@@ -1348,6 +1641,7 @@ GstStream::GstStream ()
 
       initial_seek (0),
       initial_seek_pending (true),
+      initial_play_pending (true),
 
       metadata_reported (false),
 
@@ -1363,9 +1657,8 @@ GstStream::GstStream ()
       got_audio (false),
 
       first_audio_frame (true),
-      // The first two buffers for Speex are headers. They do not appear
-      // to contain audio data and their timestamps look random (very large).
-      audio_skip_counter (2),
+      audio_skip_counter (0),
+      video_skip_counter (0),
 
       first_video_frame (true),
 
@@ -1373,6 +1666,9 @@ GstStream::GstStream ()
 
       changing_state_to_playing (false),
       reporting_status_events (false),
+
+      seek_pending (false),
+      play_pending (false),
 
       no_video_pending (false),
       error_pending  (false),
