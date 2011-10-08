@@ -653,8 +653,11 @@ GstStream::doAudioData (GstBuffer * const buffer)
 	   "size: ", fmt_def, GST_BUFFER_SIZE (buffer));
     dumpBufferFlags (buffer);
 
-    if (GST_BUFFER_FLAG_IS_SET (buffer, GST_BUFFER_FLAG_IN_CAPS))
+    if (GST_BUFFER_FLAG_IS_SET (buffer, GST_BUFFER_FLAG_IN_CAPS) ||
+	GST_BUFFER_TIMESTAMP (buffer) == (GstClockTime) -1)
+    {
 	hexdump (logs, ConstMemory (GST_BUFFER_DATA (buffer), GST_BUFFER_SIZE (buffer)));
+    }
 
     mutex.lock ();
 
@@ -838,15 +841,17 @@ GstStream::doAudioData (GstBuffer * const buffer)
     if (first_audio_frame) {
 	first_audio_frame = false;
 
-	if (!got_video || !first_video_frame) {
-	  // There's no video or we've got the first video frame already.
-	    reportMetaData ();
-	    metadata_reported_cond.signal ();
-	} else {
-	  // Waiting for the first video frame.
-	    while (got_video && first_video_frame)
-		// TODO FIXME This is a perfect way to hang up a thread.
-		metadata_reported_cond.wait (mutex);
+	if (send_metadata) {
+	    if (!got_video || !first_video_frame) {
+	      // There's no video or we've got the first video frame already.
+		reportMetaData ();
+		metadata_reported_cond.signal ();
+	    } else {
+	      // Waiting for the first video frame.
+		while (got_video && first_video_frame)
+		    // TODO FIXME This is a perfect way to hang up a thread.
+		    metadata_reported_cond.wait (mutex);
+	    }
 	}
     }
 
@@ -866,12 +871,15 @@ GstStream::doAudioData (GstBuffer * const buffer)
 	}
     }
 
-    if (GST_BUFFER_FLAG_IS_SET (buffer, GST_BUFFER_FLAG_IN_CAPS))
-	skip_frame = true;
-
     VideoStream::AudioCodecId const tmp_audio_codec_id = audio_codec_id;
     Byte const tmp_audio_hdr = audio_hdr;
     mutex.unlock ();
+
+    if (GST_BUFFER_FLAG_IS_SET (buffer, GST_BUFFER_FLAG_IN_CAPS) ||
+	GST_BUFFER_TIMESTAMP (buffer) == (GstClockTime) -1)
+    {
+	skip_frame = true;
+    }
 
     if (tmp_audio_codec_id == VideoStream::AudioCodecId::Unknown) {
 	logD_ (_func, "unknown codec id, dropping audio frame");
@@ -884,10 +892,12 @@ GstStream::doAudioData (GstBuffer * const buffer)
 	for (Size i = 0; i < num_codec_data_buffers; ++i) {
 	    Size msg_len = 0;
 
+//	    Uint64 const cd_timestamp = (Uint64) (GST_BUFFER_TIMESTAMP (codec_data_buffers [i]) / 1000000);
+	    Uint64 const cd_timestamp = 0;
+
 	    PagePool::PageListHead page_list;
 	    RtmpConnection::PrechunkContext prechunk_ctx;
 
-	    Uint64 const timestamp = (Uint64) (GST_BUFFER_TIMESTAMP (codec_data_buffers [i]) / 1000000);
 	    Byte msg_audio_hdr [2] = { tmp_audio_hdr, 0 };
 	    Size msg_audio_hdr_len = 1;
 	    if (codec_data_type == VideoStream::AudioFrameType::AacSequenceHeader)
@@ -898,7 +908,7 @@ GstStream::doAudioData (GstBuffer * const buffer)
 						 page_pool,
 						 &page_list,
 						 RtmpConnection::DefaultAudioChunkStreamId,
-						 timestamp,
+						 cd_timestamp,
 						 true /* first_chunk */);
 	    msg_len += msg_audio_hdr_len;
 
@@ -911,13 +921,12 @@ GstStream::doAudioData (GstBuffer * const buffer)
 						 page_pool,
 						 &page_list,
 						 RtmpConnection::DefaultAudioChunkStreamId,
-						 timestamp,
+						 cd_timestamp,
 						 false /* first_chunk */);
 	    msg_len += GST_BUFFER_SIZE (codec_data_buffers [i]);
 
 	    VideoStream::AudioMessage msg;
-//	    msg.timestamp = timestamp;
-	    msg.timestamp = 0;
+	    msg.timestamp = cd_timestamp;
 	    msg.prechunk_size = RtmpConnection::PrechunkSize;
 	    msg.frame_type = codec_data_type;
 	    msg.codec_id = tmp_audio_codec_id;
@@ -1085,15 +1094,17 @@ GstStream::doVideoData (GstBuffer * const buffer)
 	   video_hdr = 0x03; // Screen video
 	}
 
-	if (!got_audio || !first_audio_frame) {
-	  // There's no video or we've got the first video frame already.
-	    reportMetaData ();
-	    metadata_reported_cond.signal ();
-	} else {
-	  // Waiting for the first audio frame.
-	    while (got_audio && first_audio_frame)
-		// TODO FIXME This is a perfect way to hang up a thread.
-		metadata_reported_cond.wait (mutex);
+	if (send_metadata) {
+	    if (!got_audio || !first_audio_frame) {
+	      // There's no video or we've got the first video frame already.
+		reportMetaData ();
+		metadata_reported_cond.signal ();
+	    } else {
+	      // Waiting for the first audio frame.
+		while (got_audio && first_audio_frame)
+		    // TODO FIXME This is a perfect way to hang up a thread.
+		    metadata_reported_cond.wait (mutex);
+	    }
 	}
     }
 
