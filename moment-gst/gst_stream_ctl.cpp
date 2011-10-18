@@ -45,7 +45,8 @@ GstStreamCtl::createStream (Time const initial_seek)
 		      send_metadata,
 		      default_width,
 		      default_height,
-		      default_bitrate);
+		      default_bitrate,
+		      no_video_timeout);
 
     Ref<StreamData> const stream_data = grab (new StreamData (
 	    this, stream_ticket, stream_ticket_ref.ptr()));
@@ -270,7 +271,8 @@ GstStreamCtl::init (MomentServer      * const moment,
 		    bool                const send_metadata,
 		    Uint64              const default_width,
 		    Uint64              const default_height,
-		    Uint64              const default_bitrate)
+		    Uint64              const default_bitrate,
+		    Time                const no_video_timeout)
 {
     this->moment = moment;
     this->timers = moment->getServerApp()->getTimers();
@@ -283,6 +285,8 @@ GstStreamCtl::init (MomentServer      * const moment,
     this->default_width = default_width;
     this->default_height = default_height;
     this->default_bitrate = default_bitrate;
+
+    this->no_video_timeout = no_video_timeout;
 
     deferred_reg.setDeferredProcessor (deferred_processor);
 }
@@ -305,6 +309,8 @@ GstStreamCtl::GstStreamCtl ()
       default_width (0),
       default_height (0),
       default_bitrate (0),
+
+      no_video_timeout (0),
 
       is_chain (false),
 

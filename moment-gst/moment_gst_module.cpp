@@ -134,7 +134,7 @@ MomentGstModule::setPosition (ConstMemory const channel_name,
     if (item_name_is_id) {
 	res = channel_entry->channel->setPosition_Id (item_name, seek);
     } else {
-	Count item_idx;
+	Uint32 item_idx;
 	if (!strToUint32_safe (item_name, &item_idx)) {
 	    mutex.unlock ();
 	    logE_ (_func, "Failed to parse item index");
@@ -174,7 +174,8 @@ MomentGstModule::createPlaylistChannel (ConstMemory const channel_name,
 		   send_metadata,
 		   default_width,
 		   default_height,
-		   default_bitrate);
+		   default_bitrate,
+		   no_video_timeout);
 
     mutex.lock ();
     channel_entry_hash.add (channel_entry);
@@ -211,7 +212,8 @@ MomentGstModule::createStreamChannel (ConstMemory const channel_name,
 		   send_metadata,
 		   default_width,
 		   default_height,
-		   default_bitrate);
+		   default_bitrate,
+		   no_video_timeout);
 
     mutex.lock ();
     channel_entry_hash.add (channel_entry);
@@ -734,7 +736,7 @@ MomentGstModule::init (MomentServer * const moment)
     {
 	ConstMemory const opt_name = "mod_gst/height";
 	MConfig::GetResult const res = config->getUint64_default (
-		opt_name, &default_height,  default_height);
+		opt_name, &default_height, default_height);
 	if (!res) {
 	    logE_ (_func, "bad value for ", opt_name);
 	    return Result::Failure;
@@ -744,11 +746,23 @@ MomentGstModule::init (MomentServer * const moment)
     {
 	ConstMemory const opt_name = "mod_gst/bitrate";
 	MConfig::GetResult const res = config->getUint64_default (
-		opt_name, &default_bitrate,  default_bitrate);
+		opt_name, &default_bitrate, default_bitrate);
 	if (!res) {
 	    logE_ (_func, "bad value for ", opt_name);
 	    return Result::Failure;
 	}
+    }
+
+    {
+	ConstMemory const opt_name = "mod_gst/no_video_timeout";
+	Uint64 tmp_uint64;
+	MConfig::GetResult const res = config->getUint64_default (
+		opt_name, &tmp_uint64, no_video_timeout);
+	if (!res) {
+	    logE_ (_func, "bad value for ", opt_name);
+	    return Result::Failure;
+	}
+	no_video_timeout = (Time) tmp_uint64;
     }
 
     moment->getAdminHttpService()->addHttpHandler (
@@ -771,7 +785,8 @@ MomentGstModule::MomentGstModule()
       send_metadata (true),
       default_width (0),
       default_height (0),
-      default_bitrate (500000)
+      default_bitrate (500000),
+      no_video_timeout (30)
 {
 }
 

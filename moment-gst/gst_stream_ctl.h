@@ -69,6 +69,8 @@ private:
     mt_const Uint64 default_height;
     mt_const Uint64 default_bitrate;
 
+    mt_const Time no_video_timeout;
+
   // Stream source description
 
     mt_mutex (mutex) Ref<String> stream_spec;
@@ -155,7 +157,8 @@ public:
 			bool               send_metadata,
 			Uint64             default_width,
 			Uint64             default_height,
-			Uint64             default_bitrate);
+			Uint64             default_bitrate,
+			Time               no_video_timeout);
 
     void release ();
 

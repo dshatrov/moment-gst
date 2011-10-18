@@ -89,6 +89,8 @@ private:
     mt_const Uint64 default_height;
     mt_const Uint64 default_bitrate;
 
+    mt_const Time no_video_timeout;
+
     mt_mutex (mutex) ChannelEntryHash channel_entry_hash;
     mt_mutex (mutex) RecorderEntryHash recorder_entry_hash;
 

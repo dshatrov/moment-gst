@@ -145,7 +145,8 @@ public:
 			bool          send_metadata,
 			Size          default_width,
 			Size          default_height,
-			Size          default_bitrate);
+			Size          default_bitrate,
+			Time          no_video_timeout);
 
     Channel ();
 };

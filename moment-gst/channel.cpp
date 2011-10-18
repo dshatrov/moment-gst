@@ -173,7 +173,8 @@ Channel::init (MomentServer * const moment,
 	       bool           const send_metadata,
 	       Size           const default_width,
 	       Size           const default_height,
-	       Size           const default_bitrate)
+	       Size           const default_bitrate,
+	       Time           const no_video_timeout)
 {
     playback.init (moment->getServerApp()->getTimers());
     playback.setFrontend (CbDesc<Playback::Frontend> (
@@ -186,7 +187,8 @@ Channel::init (MomentServer * const moment,
 		      send_metadata,
 		      default_width,
 		      default_height,
-		      default_bitrate);
+		      default_bitrate,
+		      no_video_timeout);
 
     stream_ctl->setFrontend (CbDesc<GstStreamCtl::Frontend> (
 	    &gst_stream_ctl_frontend, this /* cb_data */, this /* coderef_container */));

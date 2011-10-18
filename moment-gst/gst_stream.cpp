@@ -413,11 +413,13 @@ GstStream::setPipelinePlaying ()
     assert (chain_el);
     gst_object_ref (chain_el);
 
-    no_video_timer = timers->addTimer (noVideoTimerTick,
-				       this /* cb_data */,
-				       this /* coderef_container */,
-				       15 /* TODO config param for the timeout */,
-				       true /* periodical */);
+    if (no_video_timeout > 0) {
+	no_video_timer = timers->addTimer (noVideoTimerTick,
+					   this /* cb_data */,
+					   this /* coderef_container */,
+					   no_video_timeout /* TODO config param for the timeout */,
+					   true /* periodical */);
+    }
 
     changing_state_to_playing = true;
     mutex.unlock ();
@@ -1617,7 +1619,8 @@ GstStream::init (ConstMemory   const stream_name,
 		 bool          const send_metadata,
 		 Uint64        const default_width,
 		 Uint64        const default_height,
-		 Uint64        const default_bitrate)
+		 Uint64        const default_bitrate,
+		 Time          const no_video_timeout)
 {
     this->stream_name = grab (new String (stream_name));
 
@@ -1634,6 +1637,8 @@ GstStream::init (ConstMemory   const stream_name,
     this->default_height = default_height;
     this->default_bitrate = default_bitrate;
 
+    this->no_video_timeout = no_video_timeout;
+
     this->initial_seek = initial_seek;
 }
 
@@ -1649,6 +1654,8 @@ GstStream::GstStream ()
       default_width (0),
       default_height (0),
       default_bitrate (0),
+
+      no_video_timeout (30),
 
       playbin (NULL),
       audio_probe_id (0),
