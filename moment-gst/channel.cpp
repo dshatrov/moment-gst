@@ -76,7 +76,7 @@ Channel::startPlaybackItem (Playlist::Item          * const item,
 			    Playback::AdvanceTicket * const advance_ticket,
 			    void                    * const _self)
 {
-    logD_ (_func_);
+    logD_ (_func_, ", seek: ", seek);
 
     Channel * const self = static_cast <Channel*> (_self);
 

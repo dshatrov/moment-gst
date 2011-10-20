@@ -111,6 +111,8 @@ GstStreamCtl::closeStream (bool const replace_video_stream)
 mt_unlocks (mutex) void
 GstStreamCtl::restartStream ()
 {
+    logD_ (_func_);
+
     closeStream (true /* replace_video_stream */);
 
     // TODO FIXME Set correct initial seek
