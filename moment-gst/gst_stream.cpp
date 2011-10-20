@@ -26,7 +26,8 @@ using namespace Moment;
 namespace MomentGst {
 
 namespace {
-LogGroup libMary_logGroup_bus ("moment-gst_bus", LogLevel::D);
+LogGroup libMary_logGroup_bus ("moment-gst_bus", LogLevel::N);
+LogGroup libMary_logGroup_frames ("moment-gst_frames", LogLevel::N);
 }
 
 void
@@ -649,11 +650,12 @@ GstStream::doAudioData (GstBuffer * const buffer)
     // TODO Update current time efficiently.
     updateTime ();
 
-    logD_ (_func, "stream 0x", fmt_hex, (UintPtr) this, ", "
-	   "timestamp 0x", fmt_hex, GST_BUFFER_TIMESTAMP (buffer), ", "
-	   "flags 0x", fmt_hex, GST_BUFFER_FLAGS (buffer), ", "
-	   "size: ", fmt_def, GST_BUFFER_SIZE (buffer));
-    dumpBufferFlags (buffer);
+    logD (frames, _func, "stream 0x", fmt_hex, (UintPtr) this, ", "
+	  "timestamp 0x", fmt_hex, GST_BUFFER_TIMESTAMP (buffer), ", "
+	  "flags 0x", fmt_hex, GST_BUFFER_FLAGS (buffer), ", "
+	  "size: ", fmt_def, GST_BUFFER_SIZE (buffer));
+    if (logLevelOn (frames, LogLevel::Debug))
+	dumpBufferFlags (buffer);
 
     if (GST_BUFFER_FLAG_IS_SET (buffer, GST_BUFFER_FLAG_IN_CAPS) ||
 	GST_BUFFER_TIMESTAMP (buffer) == (GstClockTime) -1)
@@ -1032,10 +1034,11 @@ GstStream::doVideoData (GstBuffer * const buffer)
     // TODO Update current time efficiently.
     updateTime ();
 
-    logD_ (_func, "stream 0x", fmt_hex, (UintPtr) this, ", "
-	   "timestamp 0x", fmt_hex, GST_BUFFER_TIMESTAMP (buffer), ", "
-	   "flags 0x", fmt_hex, GST_BUFFER_FLAGS (buffer));
-    dumpBufferFlags (buffer);
+    logD (frames, _func, "stream 0x", fmt_hex, (UintPtr) this, ", "
+	  "timestamp 0x", fmt_hex, GST_BUFFER_TIMESTAMP (buffer), ", "
+	  "flags 0x", fmt_hex, GST_BUFFER_FLAGS (buffer));
+    if (logLevelOn (frames, LogLevel::Debug))
+	dumpBufferFlags (buffer);
 
     if (GST_BUFFER_FLAG_IS_SET (buffer, GST_BUFFER_FLAG_PREROLL))
 	logD_ (_func, "preroll buffer");
@@ -1557,6 +1560,8 @@ GstStream::reportStatusEvents ()
 	    }
 
 	    if (initial_seek > 0) {
+		logD_ (_func, "initial_seek: ", initial_seek);
+
 		Time const tmp_initial_seek = initial_seek;
 		GstElement * const tmp_playbin = playbin;
 		gst_object_ref (tmp_playbin);
