@@ -84,7 +84,7 @@ private:
 
     StateMutex mutex;
 
-    mt_mutex (mutex) void advancePlayback ();
+    mt_unlocks_locks (mutex) void advancePlayback ();
 
     static void playbackTimerTick (void *_advance_ticket);
 
