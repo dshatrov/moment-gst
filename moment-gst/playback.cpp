@@ -25,7 +25,7 @@ using namespace Moment;
 
 namespace MomentGst {
 
-mt_mutex (mutex) void
+mt_unlocks_locks (mutex) void
 Playback::advancePlayback ()
 {
     logD_ (_func_);
@@ -41,6 +41,7 @@ Playback::advancePlayback ()
     while (got_next) {
 	if (first_iteration) {
 	    if (playback_timer) {
+		logD_ (_func, "Releasing playback timer");
 		timers->deleteTimer (playback_timer);
 		playback_timer = NULL;
 	    }
@@ -49,6 +50,7 @@ Playback::advancePlayback ()
 
 	    advance_ticket = grab (new AdvanceTicket (this));
 
+	    logD_ (_func, "calling frontend->stopItem");
 	    if (frontend)
 		mt_unlocks_locks (mutex) frontend.call_mutex (frontend->stopItem, mutex);
 	} else {
@@ -105,6 +107,7 @@ Playback::advancePlayback ()
 
 	logD_ (_func, "next_start_rel: ", next_start_rel);
 	if (next_start_rel > 0) {
+	    logD_ (_func, "Setting playback timer to ", next_start_rel, " (next_start_rel)");
 	    playback_timer = timers->addTimer (
 		    CbDesc<Timers::TimerCallback> (playbackTimerTick,
 						   advance_ticket /* cb_data */,
@@ -129,9 +132,9 @@ Playback::advancePlayback ()
 		    false /* periodical */);
 	}
 
+	logD_ (_func, "Calling frontend->startItem");
 	if (frontend) {
 	    Ref<AdvanceTicket> const tmp_advance_ticket = advance_ticket;
-	    logD_ (_func, "Calling frontend->startItem");
 	    frontend.call_mutex (frontend->startItem, mutex, next_item, next_seek, tmp_advance_ticket);
 	}
     } // while (got_next)
@@ -173,7 +176,7 @@ mt_mutex (mutex) void
 Playback::doSetPosition (Playlist::Item * const item,
 			 Time             const seek)
 {
-    logD_ (_func_);
+    logD_ (_func_, ", seek: ", seek);
 
     Time duration = 0;
     if (!item->duration_full) {
@@ -188,7 +191,7 @@ Playback::doSetPosition (Playlist::Item * const item,
     next_start_rel = 0;
     next_seek = seek;
     next_duration = duration;
-    next_duration_full = item->duration_full;
+    next_duration_full = item->duration_full || item->duration_default;
 
     advancePlayback ();
 }
@@ -274,6 +277,7 @@ Playback::setPosition_Id (ConstMemory const id,
 
     Playlist::Item * const item = playlist.getItemById (id);
     if (!item) {
+	mutex.unlock ();
 	logE_ (_func, "Item with id \"", id, "\" not found");
 	return Result::Failure;
     }
@@ -292,6 +296,7 @@ Playback::setPosition_Index (Count const idx,
 
     Playlist::Item * const item = playlist.getNthItem (idx);
     if (!item) {
+	mutex.unlock ();
 	logE_ (_func, "Item #", idx, " not found");
 	return Result::Failure;
     }
