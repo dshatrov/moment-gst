@@ -30,6 +30,8 @@
 using namespace M;
 using namespace Moment;
 
+static LogGroup libMary_logGroup_playlist ("MomentGst.playlist", LogLevel::I);
+
 namespace MomentGst {
 
 Playlist::Item*
@@ -41,33 +43,33 @@ Playlist::getNextItem (Item  * const prv_item,
 		       Time  * const mt_nonnull ret_duration,
 		       bool  * const mt_nonnull ret_duration_full)
 {
-    logD_ (_func, "cur_time: ", cur_time, ", time_offset: ", time_offset);
+    logD (playlist, _func, "cur_time: ", cur_time, ", time_offset: ", time_offset);
 
     Item *item = prv_item;
     for (;;) {
 	if (item)
 	    item = ItemList::getNext (item);
 	else {
-	    logD_ (_func, "First item");
+	    logD (playlist, _func, "First item");
 	    item = item_list.getFirst();
 	}
 
 	if (!item) {
-	    logD_ (_func, "No next item");
+	    logD (playlist, _func, "No next item");
 	    break;
 	}
 
-	logD_ (_func, "item: 0x", fmt_hex, (UintPtr) item);
+	logD (playlist, _func, "item: 0x", fmt_hex, (UintPtr) item);
 
-	logD_ (_func, "start_time: ", item->start_time, ", "
-	       "start_immediate: ", item->start_immediate ? "true" : "false", ", "
-	       "end_time: ", item->end_time, ", "
-	       "got_end_time: ", item->got_end_time ? "true" : "false", ", "
-	       "duration: ", item->duration, ", "
-	       "duration_full: ", item->duration_full ? "true" : "false", ", "
-	       "duration_default: ", item->duration_default ? "true" : "false");
-	logD_ (_func, "chain_spec: ", item->chain_spec);
-	logD_ (_func, "uri: ", item->uri);
+	logD (playlist, _func, "start_time: ", item->start_time, ", "
+	      "start_immediate: ", item->start_immediate ? "true" : "false", ", "
+	      "end_time: ", item->end_time, ", "
+	      "got_end_time: ", item->got_end_time ? "true" : "false", ", "
+	      "duration: ", item->duration, ", "
+	      "duration_full: ", item->duration_full ? "true" : "false", ", "
+	      "duration_default: ", item->duration_default ? "true" : "false");
+	logD (playlist, _func, "chain_spec: ", item->chain_spec);
+	logD (playlist, _func, "uri: ", item->uri);
 
 	if (item->start_immediate) {
 	    *ret_start_rel = 0;
@@ -88,7 +90,7 @@ Playlist::getNextItem (Item  * const prv_item,
 
 	    if (item->got_end_time) {
 		Int64 const end_rel = (Int64) item->end_time - ((Int64) cur_time + time_offset);
-		logD_ (_func, "end_rel: ", end_rel);
+		logD (playlist, _func, "end_rel: ", end_rel);
 
 		if (end_rel <= 0)
 		    continue;
@@ -116,7 +118,7 @@ Playlist::getNextItem (Item  * const prv_item,
 	}
 
 	Int64 const start_rel = (Int64) item->start_time - ((Int64) cur_time + time_offset);
-	logD_ (_func, "start_rel: ", start_rel);
+	logD (playlist, _func, "start_rel: ", start_rel);
 	if (start_rel >= 0) {
 	    *ret_start_rel = (Time) start_rel;
 	    *ret_seek = item->seek;
@@ -184,7 +186,7 @@ Playlist::getNextItem (Item  * const prv_item,
 
   // End of playlist.
 
-    logD_ (_func, "Returning NULL");
+    logD (playlist, _func, "Returning NULL");
 
     *ret_start_rel = 0;
     *ret_seek = 0;
@@ -255,7 +257,7 @@ Playlist::doParsePlaylist (xmlDocPtr doc)
 	ConstMemory const cur_node_name ((Byte const *) cur_node->name,
 					 cur_node->name ? strlen ((char const *) cur_node->name) : 0);
 
-	logD_ (_func, "cur_node_name: ", cur_node_name);
+	logD (playlist, _func, "cur_node_name: ", cur_node_name);
 
 	if (equal (cur_node_name, "item")) {
 	    Item * const item = new Item;
@@ -285,7 +287,7 @@ Playlist::parseItem (xmlDocPtr   doc,
 	ConstMemory const cur_node_name ((Byte const *) cur_node->name,
 					 cur_node->name ? strlen ((char const *) cur_node->name) : 0);
 
-	logD_ (_func, "cur_node_name: ", cur_node_name);
+	logD (playlist, _func, "cur_node_name: ", cur_node_name);
 
 	if (equal (cur_node_name, "chain")) {
 	    xmlChar * const val_str = xmlNodeListGetString (doc, cur_node->children, 1 /* inLine */);
@@ -333,7 +335,7 @@ Playlist::parseItem (xmlDocPtr   doc,
     if (path.len())
 	item->uri = makeString ("file://", path);
 
-    logD_ (_func, "Parsing attributes");
+    logD (playlist, _func, "Parsing attributes");
     parseItemAttributes (item_node, item);
 }
 
@@ -355,8 +357,8 @@ static Result parseTime (xmlChar * const mt_nonnull time_str,
 	return Result::Failure;
     }
 
-    logD_ (_func, ConstMemory ((Byte const *) time_str, strlen ((char const *) time_str)),
-	   " { ", time_val.tv_sec, ", ", time_val.tv_usec, " }");
+    logD (playlist, _func, ConstMemory ((Byte const *) time_str, strlen ((char const *) time_str)),
+	  " { ", time_val.tv_sec, ", ", time_val.tv_usec, " }");
 #endif
 
     LibMary_ThreadLocal * const tlocal = libMary_getThreadLocal();
@@ -488,7 +490,7 @@ static Result parseTime (xmlChar * const mt_nonnull time_str,
 	return Result::Failure;
     }
 
-    logD_ (_func, year, "/", month + 1, "/", day, " ", hour, ":", minute, ":", seconds);
+    logD (playlist, _func, year, "/", month + 1, "/", day, " ", hour, ":", minute, ":", seconds);
 
     if (!got_date && !got_time) {
 	logE_ (_func, "Empty date/time");
@@ -528,7 +530,7 @@ static Result parseTime (xmlChar * const mt_nonnull time_str,
 	}
     }
 
-    logD_ (_func, "ret_time: ", *ret_time);
+    logD (playlist, _func, "ret_time: ", *ret_time);
 
     return Result::Success;
 }
@@ -564,7 +566,7 @@ Playlist::parseItemAttributes (xmlNodePtr  node,
 
 	xmlChar * const end_val = xmlGetProp (node, (xmlChar const *) "end");
 	if (end_val) {
-	    logD_ (_func, "end_val: ", ConstMemory ((Byte const *) end_val, strlen ((char const *) end_val)));
+	    logD (playlist, _func, "end_val: ", ConstMemory ((Byte const *) end_val, strlen ((char const *) end_val)));
 	    item->got_end_time = true;
 	    if (!parseTime (end_val, &item->end_time))
 		item->got_end_time = false;
@@ -583,7 +585,7 @@ Playlist::parseItemAttributes (xmlNodePtr  node,
 	if (duration_val) {
 	    ConstMemory const duration_mem ((Byte const *) duration_val, strlen ((char const *) duration_val));
 	    if (equal (duration_mem, "full")) {
-		logD_ (_func, "duration=\"full\"");
+		logD (playlist, _func, "duration=\"full\"");
 		item->duration_default = false;
 		item->duration_full = true;
 		item->duration = (Time) -1;
@@ -598,7 +600,7 @@ Playlist::parseItemAttributes (xmlNodePtr  node,
 		}
 	    }
 	} else {
-	    logD_ (_func, "No duration");
+	    logD (playlist, _func, "No duration");
 	    item->duration_default = true;
 	    item->duration_full = false;
 	    item->duration = (Time) -1;
