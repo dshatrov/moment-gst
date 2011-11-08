@@ -29,7 +29,7 @@ namespace {
 
 MomentGstModule gst_module;
 
-void momentGstInit ()
+void doMomentGstInit ()
 {
     logD_ ("GST MODULE INIT");
 
@@ -64,8 +64,8 @@ void momentGstInit ()
 
 	    int argc = 2;
 	    char* argv [] = {
-		"moment",
-		"--gst-debug=*:3",
+		(char*) "moment",
+		(char*) "--gst-debug=*:3",
 		NULL
 	    };
 
@@ -78,6 +78,24 @@ void momentGstInit ()
 
     if (!gst_module.init (MomentServer::getInstance()))
 	logE_ (_func, "gst_module.init() failed");
+}
+
+// Initialization from a separate thread to cure deadlocks with glibc 1.14
+// has been tried, but did no good.
+static void momentGstInit_threadFunc (void * const /* cb_data */)
+{
+    doMomentGstInit ();
+}
+
+static void momentGstInit ()
+{
+#if 0
+    Ref<Thread> const thread = grab (new Thread (
+	    CbDesc<Thread::ThreadFunc> (momentGstInit_threadFunc, NULL, NULL)));
+    if (!thread->spawn (false /* joinable */))
+	logE_ (_func, "Failed to spawn initializer thread: ", exc->toString());
+#endif
+    doMomentGstInit ();
 }
 
 void momentGstUnload ()
