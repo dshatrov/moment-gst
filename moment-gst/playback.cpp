@@ -25,13 +25,17 @@ using namespace Moment;
 
 namespace MomentGst {
 
+namespace {
+LogGroup libMary_logGroup_playback ("moment-gst_playback", LogLevel::I);
+}
+
 mt_unlocks_locks (mutex) void
 Playback::advancePlayback ()
 {
-    logD_ (_func_);
+    logD (playback, _func_);
 
     if (advancing) {
-	logD_ (_func, "already advancing");
+	logD (playback, _func, "already advancing");
 	return;
     }
     advancing = true;
@@ -41,7 +45,7 @@ Playback::advancePlayback ()
     while (got_next) {
 	if (first_iteration) {
 	    if (playback_timer) {
-		logD_ (_func, "Releasing playback timer");
+		logD (playback, _func, "Releasing playback timer");
 		timers->deleteTimer (playback_timer);
 		playback_timer = NULL;
 	    }
@@ -50,7 +54,7 @@ Playback::advancePlayback ()
 
 	    advance_ticket = grab (new AdvanceTicket (this));
 
-	    logD_ (_func, "calling frontend->stopItem");
+	    logD (playback, _func, "calling frontend->stopItem");
 	    if (frontend)
 		mt_unlocks_locks (mutex) frontend.call_mutex (frontend->stopItem, mutex);
 	} else {
@@ -60,7 +64,7 @@ Playback::advancePlayback ()
 	// Resetting 'got_next' after a call to frontend->stopItem.
 	got_next = false;
 
-	logD_ (_func, "next_item: 0x", fmt_hex, (UintPtr) next_item);
+	logD (playback, _func, "next_item: 0x", fmt_hex, (UintPtr) next_item);
 
 	cur_item = next_item;
 	if (next_item == NULL) {
@@ -72,7 +76,7 @@ Playback::advancePlayback ()
 					      &next_duration,
 					      &next_duration_full);
 	    if (next_item == NULL) {
-		logD_ (_func, "Empty playlist");
+		logD (playback, _func, "Empty playlist");
 		goto _return;
 	    }
 
@@ -105,9 +109,9 @@ Playback::advancePlayback ()
 	    continue;
 	}
 
-	logD_ (_func, "next_start_rel: ", next_start_rel);
+	logD (playback, _func, "next_start_rel: ", next_start_rel);
 	if (next_start_rel > 0) {
-	    logD_ (_func, "Setting playback timer to ", next_start_rel, " (next_start_rel)");
+	    logD (playback, _func, "Setting playback timer to ", next_start_rel, " (next_start_rel)");
 	    playback_timer = timers->addTimer (
 		    CbDesc<Timers::TimerCallback> (playbackTimerTick,
 						   advance_ticket /* cb_data */,
@@ -122,7 +126,7 @@ Playback::advancePlayback ()
 	}
 
 	if (!next_duration_full) {
-	    logD_ (_func, "Setting playback timer to ", next_duration, " (duration)");
+	    logD (playback, _func, "Setting playback timer to ", next_duration, " (duration)");
 	    playback_timer = timers->addTimer (
 		    CbDesc<Timers::TimerCallback> (playbackTimerTick,
 						   advance_ticket /* cb_data */,
@@ -132,7 +136,7 @@ Playback::advancePlayback ()
 		    false /* periodical */);
 	}
 
-	logD_ (_func, "Calling frontend->startItem");
+	logD (playback, _func, "Calling frontend->startItem");
 	if (frontend) {
 	    Ref<AdvanceTicket> const tmp_advance_ticket = advance_ticket;
 	    frontend.call_mutex (frontend->startItem, mutex, next_item, next_seek, tmp_advance_ticket);
@@ -149,7 +153,7 @@ Playback::playbackTimerTick (void * const _advance_ticket)
     AdvanceTicket * const advance_ticket = static_cast <AdvanceTicket*> (_advance_ticket);
     Playback * const self = advance_ticket->playback;
 
-    logD_ (_func_);
+    logD (playback, _func_);
 
     self->mutex.lock ();
     if (self->advance_ticket != advance_ticket) {
@@ -176,7 +180,7 @@ mt_mutex (mutex) void
 Playback::doSetPosition (Playlist::Item * const item,
 			 Time             const seek)
 {
-    logD_ (_func_, ", seek: ", seek);
+    logD (playback, _func_, ", seek: ", seek);
 
     Time duration = 0;
     if (!item->duration_full) {
@@ -202,7 +206,7 @@ Playback::doLoadPlaylist (ConstMemory   const src,
 			  Ref<String> * const ret_err_msg,
 			  bool          const is_file)
 {
-    logD_ (_func_);
+    logD (playback, _func_);
 
     mutex.lock ();
 
@@ -248,7 +252,7 @@ Playback::doLoadPlaylist (ConstMemory   const src,
 void
 Playback::advance (AdvanceTicket * const user_advance_ticket)
 {
-    logD_ (_func_);
+    logD (playback, _func_);
 
     mutex.lock ();
     if (user_advance_ticket != advance_ticket) {
@@ -311,7 +315,7 @@ void
 Playback::setSingleItem (ConstMemory const stream_spec,
 			 bool        const is_chain)
 {
-    logD_ (_func_);
+    logD (playback, _func_);
 
     mutex.lock ();
     playlist.clear ();
@@ -333,7 +337,7 @@ Playback::setSingleItem (ConstMemory const stream_spec,
 void
 Playback::setSingleChannelRecorder (ConstMemory const channel_name)
 {
-    logD_ (_func_);
+    logD (playback, _func_);
 
     mutex.lock ();
     playlist.clear ();
