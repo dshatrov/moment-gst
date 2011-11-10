@@ -29,7 +29,7 @@ static LogGroup libMary_logGroup_chains ("moment-gst_chains", LogLevel::I);
 static LogGroup libMary_logGroup_pipeline ("moment-gst_pipeline", LogLevel::I);
 static LogGroup libMary_logGroup_stream ("moment-gst_stream", LogLevel::I);
 static LogGroup libMary_logGroup_bus ("moment-gst_bus", LogLevel::I);
-static LogGroup libMary_logGroup_frames ("moment-gst_frames", LogLevel::E);
+static LogGroup libMary_logGroup_frames ("moment-gst_frames", LogLevel::E); // E is the default
 static LogGroup libMary_logGroup_novideo ("moment-gst_novideo", LogLevel::I);
 
 void
@@ -538,8 +538,9 @@ GstStream::reportMetaData ()
     }
     metadata_reported = true;
 
-    if (!send_metadata)
+    if (!send_metadata) {
 	return;
+    }
 
     VideoStream::VideoMessage msg;
     if (!RtmpServer::encodeMetaData (&metadata, page_pool, &msg)) {
@@ -1076,6 +1077,14 @@ GstStream::doVideoData (GstBuffer * const buffer)
     }
 #endif
 
+#if 0
+    // TEST
+    if (GST_BUFFER_SIZE (buffer) <= 64) {
+	logD_ (_func, "Ignoring small buffer");
+	return;
+    }
+#endif
+
     mutex.lock ();
 
     last_frame_time = getTime ();
@@ -1105,6 +1114,7 @@ GstStream::doVideoData (GstBuffer * const buffer)
 	   video_codec_id = VideoStream::VideoCodecId::AVC;
 	   video_hdr = 0x07; // AVC
 
+	   bool got_codec_data = false;
 	   do {
 	     // Processing AvcSequenceHeader
 
@@ -1121,7 +1131,14 @@ GstStream::doVideoData (GstBuffer * const buffer)
 
 	       avc_codec_data_buffer = gst_value_get_buffer (val);
 	       logD (frames, _func, "avc_codec_data_buffer: 0x", fmt_hex, (UintPtr) avc_codec_data_buffer);
+	       got_codec_data = true;
 	   } while (0);
+
+#if 0
+	   if (!got_codec_data && GST_BUFFER_TIMESTAMP (buffer) == -1) {
+	       avc_codec_data_buffer = buffer;
+	   }
+#endif
 	} else
 	if (equal (st_name_mem, "video/x-vp6")) {
 	   video_codec_id = VideoStream::VideoCodecId::VP6;
@@ -1166,6 +1183,12 @@ GstStream::doVideoData (GstBuffer * const buffer)
     Byte const tmp_video_hdr = video_hdr;
     mutex.unlock ();
 
+    if (GST_BUFFER_FLAG_IS_SET (buffer, GST_BUFFER_FLAG_IN_CAPS) ||
+	GST_BUFFER_TIMESTAMP (buffer) == (GstClockTime) -1)
+    {
+	skip_frame = true;
+    }
+
     if (avc_codec_data_buffer) {
       // Reporting AVC codec data if needed.
 
@@ -1191,6 +1214,16 @@ GstStream::doVideoData (GstBuffer * const buffer)
 	logD (frames,_func, "AVC SEQUENCE HEADER");
 	if (logLevelOn (frames, LogLevel::D))
 	    hexdump (logs, ConstMemory (GST_BUFFER_DATA (avc_codec_data_buffer), GST_BUFFER_SIZE (avc_codec_data_buffer)));
+
+#if 0
+	// TEST
+	if (GST_BUFFER_SIZE (avc_codec_data_buffer) >= 4) {
+	    GST_BUFFER_DATA (avc_codec_data_buffer) [0] = 0x01;
+	    GST_BUFFER_DATA (avc_codec_data_buffer) [1] = 0x4d;
+	    GST_BUFFER_DATA (avc_codec_data_buffer) [2] = 0x40;
+	    GST_BUFFER_DATA (avc_codec_data_buffer) [3] = 0x28;
+	}
+#endif
 
 	RtmpConnection::fillPrechunkedPages (&prechunk_ctx,
 					     ConstMemory (GST_BUFFER_DATA (avc_codec_data_buffer),
