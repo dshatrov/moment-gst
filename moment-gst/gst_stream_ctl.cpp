@@ -28,6 +28,14 @@ namespace MomentGst {
 mt_mutex (mutex) void
 GstStreamCtl::createStream (Time const initial_seek)
 {
+/* closeStream() is always called before createStream(), so this is unnecessary.
+ *
+    if (gst_stream) {
+	gst_stream->releasePipeline ();
+	gst_stream = NULL;
+    }
+ */
+
     if (!video_stream) {
 	video_stream = grab (new VideoStream);
 	logD_ (_func, "Calling moment->addVideoStream, stream_name: ", stream_name->mem());

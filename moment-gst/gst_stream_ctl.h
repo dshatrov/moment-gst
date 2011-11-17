@@ -39,14 +39,26 @@ class GstStreamCtl : public Object
 public:
     struct Frontend
     {
+	// Called when a new VideoStream object is created for the stream.
+	//
+	// In a perfect implementation, this would never be called. Currently,
+	// newVideoStream() is called every time a new VideoStream is created
+	// by GstStreamCtl's initiative. E.g., when it reconnects to the video
+	// source after no_video_timeout expires). Note that beginVideoStream()
+	// implies creation of a new VideoStream as well, but newVideoStream()
+	// callback is not called in this cases because the initiative comes
+	// from the outside.
+	//
 	// Called with GstStream::mutex held.
 	void (*newVideoStream) (void *stream_ticket,
 				void *cb_data);
 
+	// Called every time playback interrupts because of some error.
 	void (*error) (void *stream_ticket,
 		       void *cb_data);
 
 	// End of stream.
+	// Called when end of stream is reached for the current video source.
 	void (*eos) (void *stream_ticket,
 		     void *cb_data);
     };
