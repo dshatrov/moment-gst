@@ -312,6 +312,8 @@ MomentGstModule::adminHttpRequest (HttpRequest  * const mt_nonnull req,
 			       MOMENT_GST__500_HEADERS (err_msg->mem().len()),
 			       "\r\n",
 			       err_msg->mem());
+
+	    logA_ ("gst_admin 500 ", req->getClientAddress(), " ", req->getRequestLine());
 	    goto _return;
 	}
 
@@ -321,6 +323,8 @@ MomentGstModule::adminHttpRequest (HttpRequest  * const mt_nonnull req,
 			   MOMENT_GST__OK_HEADERS ("text/plain", reply_body.len()),
 			   "\r\n",
 			   reply_body);
+
+	logA_ ("gst_admin 200 ", req->getClientAddress(), " ", req->getRequestLine());
     } else
     if (req->getNumPathElems() == 5
 	&& (equal (req->getPath (1), "set_position") ||
@@ -338,6 +342,8 @@ MomentGstModule::adminHttpRequest (HttpRequest  * const mt_nonnull req,
 			       MOMENT_GST__500_HEADERS (reply_body.len()),
 			       "\r\n",
 			       reply_body);
+
+	    logA_ ("gst_admin 500 ", req->getClientAddress(), " ", req->getRequestLine());
 	    goto _return;
 	}
 
@@ -347,6 +353,8 @@ MomentGstModule::adminHttpRequest (HttpRequest  * const mt_nonnull req,
 			   MOMENT_GST__OK_HEADERS ("text/plain", reply_body.len()),
 			   "\r\n",
 			   reply_body);
+
+	logA_ ("gst_admin 200 ", req->getClientAddress(), " ", req->getRequestLine());
     } else {
 	logE_ (_func, "Unknown admin HTTP request: ", req->getFullPath());
 
@@ -356,6 +364,8 @@ MomentGstModule::adminHttpRequest (HttpRequest  * const mt_nonnull req,
 			   MOMENT_GST__404_HEADERS (reply_body.len()),
 			   "\r\n",
 			   reply_body);
+
+	logA_ ("gst_admin 404 ", req->getClientAddress(), " ", req->getRequestLine());
     }
 
 _return:
