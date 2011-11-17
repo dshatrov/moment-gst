@@ -29,7 +29,7 @@ static LogGroup libMary_logGroup_chains ("moment-gst_chains", LogLevel::I);
 static LogGroup libMary_logGroup_pipeline ("moment-gst_pipeline", LogLevel::I);
 static LogGroup libMary_logGroup_stream ("moment-gst_stream", LogLevel::I);
 static LogGroup libMary_logGroup_bus ("moment-gst_bus", LogLevel::I);
-static LogGroup libMary_logGroup_frames ("moment-gst_frames", LogLevel::E); // E is the default
+static LogGroup libMary_logGroup_frames ("moment-gst_frames", LogLevel::I); // E is the default
 static LogGroup libMary_logGroup_novideo ("moment-gst_novideo", LogLevel::I);
 
 void
@@ -136,8 +136,10 @@ GstStream::createPipelineForChainSpec ()
 
     logD (chains, _func, "chain \"", stream_name, "\" created");
 
-    if (!mt_unlocks (mutex) setPipelinePlaying ())
+    if (!mt_unlocks (mutex) setPipelinePlaying ()) {
+	mutex.lock ();
 	goto _failure;
+    }
 
     goto _return;
   }
@@ -377,8 +379,10 @@ GstStream::createPipelineForUri ()
 
     // TODO got_video, got_auido -?
 
-    if (!mt_unlocks (mutex) setPipelinePlaying ())
+    if (!mt_unlocks (mutex) setPipelinePlaying ()) {
+	mutex.lock ();
 	goto _failure;
+    }
   }
 
     goto _return;
@@ -466,11 +470,9 @@ _failure:
     return Result::Failure;
 }
 
-void
+mt_unlocks (mutex) void
 GstStream::pipelineCreationFailed ()
 {
-    mutex.lock ();
-
     if (no_video_timer) {
 	timers->deleteTimer (no_video_timer);
 	no_video_timer = NULL;
@@ -500,6 +502,8 @@ GstStream::pipelineCreationFailed ()
 void
 GstStream::releasePipeline ()
 {
+    logD (pipeline, _func_);
+
     mutex.lock ();
 
     if (no_video_timer) {
@@ -670,9 +674,9 @@ GstStream::doAudioData (GstBuffer * const buffer)
     mutex.lock ();
 
     last_frame_time = getTime ();
-//    logD_ (_func, "last_frame_time: 0x", fmt_hex, last_frame_time);
+    logD (frames, _func, "last_frame_time: 0x", fmt_hex, last_frame_time);
 
-    if (prv_audio_timestamp >= GST_BUFFER_TIMESTAMP (buffer)) {
+    if (prv_audio_timestamp > GST_BUFFER_TIMESTAMP (buffer)) {
 	logW (frames, _func, "backwards timestamp: prv 0x", fmt_hex, prv_audio_timestamp,
 	      ", cur 0x", fmt_hex, GST_BUFFER_TIMESTAMP (buffer)); 
     }
@@ -1088,7 +1092,7 @@ GstStream::doVideoData (GstBuffer * const buffer)
     mutex.lock ();
 
     last_frame_time = getTime ();
-//    logD_ (_func, "last_frame_time: 0x", fmt_hex, last_frame_time);
+    logD (frames, _func, "last_frame_time: 0x", fmt_hex, last_frame_time);
 
     GstBuffer *avc_codec_data_buffer = NULL;
     if (first_video_frame) {
@@ -1529,6 +1533,8 @@ GstStream::noVideoTimerTick (void * const _self)
     if (time > self->last_frame_time &&
 	time - self->last_frame_time >= 15 /* TODO Config param for the timeout */)
     {
+	logD (novideo, _func, "firing \"no video\" event");
+
 	if (self->no_video_timer) {
 	    self->timers->deleteTimer (self->no_video_timer);
 	    self->no_video_timer = NULL;
@@ -1729,6 +1735,8 @@ GstStream::GstStream ()
 
       no_video_timeout (30),
 
+      no_video_timer (NULL),
+
       playbin (NULL),
       audio_probe_id (0),
       video_probe_id (0),
@@ -1775,6 +1783,8 @@ GstStream::GstStream ()
 
 GstStream::~GstStream ()
 {
+    logD (pipeline, _func, "~GstStream()");
+
     releasePipeline ();
 }
 
