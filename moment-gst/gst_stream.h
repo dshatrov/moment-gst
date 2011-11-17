@@ -104,6 +104,7 @@ private:
 
       // This flag helps to prevent concurrent pipeline state transition
       // requests (to NULL and to PLAYING states).
+      // TODO FIXME chaning_state_to_playing is not used in all cases where it should be.
       bool changing_state_to_playing;
 
       bool reporting_status_events;
@@ -141,7 +142,7 @@ private:
 
     mt_unlocks (mutex) Result setPipelinePlaying ();
 
-    void pipelineCreationFailed ();
+    mt_unlocks (mutex) void pipelineCreationFailed ();
 
   // Audio/video data handling
 
