@@ -25,13 +25,23 @@ using namespace Moment;
 
 namespace MomentGst {
 
-namespace {
+static MomentGstModule gst_module;
 
-MomentGstModule gst_module;
-
-void doMomentGstInit ()
+static void glibLoopThreadFunc (void * const /* cb_data */)
 {
-    logD_ ("GST MODULE INIT");
+    updateTime();
+//    logD_ (_func, "g_main_context_default(): 0x", fmt_hex, (UintPtr) g_main_context_default());
+//    logD_ (_func, "g_main_context_get_thread_default(): 0x", fmt_hex, (UintPtr) g_main_context_get_thread_default());
+
+    GMainLoop * const loop = g_main_loop_new (g_main_context_default() /* same as NULL? */, FALSE);
+    g_main_loop_run (loop);
+    g_main_loop_unref (loop);
+    logI_ (_func, "done");
+}
+
+static void doMomentGstInit ()
+{
+    logI_ ("Initializing mod_gst");
 
     MomentServer * const moment = MomentServer::getInstance();
     MConfig::Config * const config = moment->getConfig();
@@ -89,21 +99,29 @@ static void momentGstInit_threadFunc (void * const /* cb_data */)
 
 static void momentGstInit ()
 {
+    {
+	Ref<Thread> const thread = grab (new Thread (
+		CbDesc<Thread::ThreadFunc> (glibLoopThreadFunc, NULL, NULL)));
+	if (!thread->spawn (false /* joinable */))
+	    logE_ (_func, "Failed to spawn glib main loop thread: ", exc->toString());
+    }
+
 #if 0
-    Ref<Thread> const thread = grab (new Thread (
-	    CbDesc<Thread::ThreadFunc> (momentGstInit_threadFunc, NULL, NULL)));
-    if (!thread->spawn (false /* joinable */))
-	logE_ (_func, "Failed to spawn initializer thread: ", exc->toString());
+    {
+	Ref<Thread> const thread = grab (new Thread (
+		CbDesc<Thread::ThreadFunc> (momentGstInit_threadFunc, NULL, NULL)));
+	if (!thread->spawn (false /* joinable */))
+	    logE_ (_func, "Failed to spawn initializer thread: ", exc->toString());
+    }
 #endif
+
     doMomentGstInit ();
 }
 
-void momentGstUnload ()
+static void momentGstUnload ()
 {
-    logD_ ("GST MODULE UNLOAD");
+    logI_ ("Unloading mod_gst");
 }
-
-} // namespace {}
 
 } // namespace MomentGst
 
