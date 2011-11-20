@@ -797,7 +797,7 @@ MomentGstModule::init (MomentServer * const moment)
     }
 
     moment->getAdminHttpService()->addHttpHandler (
-	    Cb<HttpService::HttpHandler> (
+	    CbDesc<HttpService::HttpHandler> (
 		    &admin_http_handler, this /* cb_data */, NULL /* coderef_container */),
 	    "moment_admin");
 
