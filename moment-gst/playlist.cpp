@@ -381,7 +381,7 @@ static Result parseTime (xmlChar * const mt_nonnull time_str,
 
     for (int i = 0; i < 2; ++i) {
 	Uint32 num [3];
-	char separator;
+	char separator = ' ';
 
 	int j;
 	for (j = 0; j < 3; ++j) {
