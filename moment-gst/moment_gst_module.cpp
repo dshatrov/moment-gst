@@ -172,6 +172,7 @@ MomentGstModule::createPlaylistChannel (ConstMemory const channel_name,
     channel->init (moment,
 		   channel_name,
 		   send_metadata,
+		   keep_video_streams,
 		   default_width,
 		   default_height,
 		   default_bitrate,
@@ -212,6 +213,7 @@ MomentGstModule::createStreamChannel (ConstMemory const channel_name,
     channel->init (moment,
 		   channel_name,
 		   send_metadata,
+		   keep_video_streams,
 		   default_width,
 		   default_height,
 		   default_bitrate,
@@ -290,17 +292,92 @@ HttpService::HttpHandler MomentGstModule::admin_http_handler = {
 Result
 MomentGstModule::adminHttpRequest (HttpRequest  * const mt_nonnull req,
 				   Sender       * const mt_nonnull conn_sender,
-				   Memory const &msg_body,
-				   void        ** const mt_nonnull ret_msg_data,
+				   Memory const & /* msg_body */,
+				   void        ** const mt_nonnull /* ret_msg_data */,
 				   void         * const _self)
 {
     MomentGstModule * const self = static_cast <MomentGstModule*> (_self);
 
-    MOMENT_GST__HEADERS_DATE;
+    logD_ (_func_);
 
+    MOMENT_GST__HEADERS_DATE
+
+    if (req->getNumPathElems() >= 2
+	&& equal (req->getPath (1), "set_channel"))
+    {
+      // TODO
+
+	ConstMemory const channel_name = req->getParameter ("name");
+	if (channel_name.mem() == NULL) {
+	    logE_ (_func, "set_channel: no channel name (\"name\" parameter)\n");
+	    goto _bad_request;
+	}
+
+	// "src_" prefix indicates that only one of these parameters can be
+	// specified at a time.
+	ConstMemory const src_chain    = req->getParameter ("src_chain");
+	ConstMemory const src_path     = req->getParameter ("src_path");
+	ConstMemory const src_uri      = req->getParameter ("src_uri");
+	ConstMemory const src_playlist = req->getParameter ("src_playlist");
+
+	{
+	  unsigned count = 0;
+	  if (src_chain.len())
+	    ++count;
+	  if (src_path.len())
+	    ++count;
+	  if (src_uri.len())
+	    ++count;
+	  if (src_playlist.len())
+	    ++count;
+
+	  if (count == 0) {
+	    logE_ (_func, "set_channel: no video source");
+	    goto _bad_request;
+	  }
+
+	  if (count > 1) {
+	    logE_ (_func, "set_channel: multiple video sources in a single request");
+	    goto _bad_request;
+	  }
+	}
+
+	if (src_chain.len()) {
+	    self->createStreamChannel (channel_name,
+				       src_chain,
+				       true /* is_chain */,
+				       false /* recording */,
+				       ConstMemory() /* record_path */);
+	} else
+	if (src_path.len()) {
+	    self->createStreamChannel (channel_name,
+				       makeString ("file://", src_path)->mem(),
+				       false /* is_chain */,
+				       false /* recording */,
+				       ConstMemory() /* record_path */);
+	} else
+	if (src_uri.len()) {
+	    self->createStreamChannel (channel_name,
+				       src_uri,
+				       false /* is_chain */,
+				       false /* recording */,
+				       ConstMemory() /* record_path */);
+	} else
+	if (src_playlist.len()) {
+	    self->createPlaylistChannel (channel_name,
+					 src_playlist,
+					 false /* recording */,
+					 ConstMemory() /* record_path */);
+	}
+    } else
+    if (req->getNumPathElems() >= 2
+	&& equal (req->getPath (1), "delete_channel"))
+    {
+      // TODO
+    } else
     if (req->getNumPathElems() == 3
-	&& (equal (req->getPath (1), "update_playlist") ||
-	    equal (req->getPath (1), "update_playlist_now")))
+    && (equal (req->getPath (1), "update_playlist") ||
+	equal (req->getPath (1), "update_playlist_now")))
     {
 	ConstMemory const playlist_name = req->getPath (2);
 
@@ -370,6 +447,22 @@ MomentGstModule::adminHttpRequest (HttpRequest  * const mt_nonnull req,
 
 _return:
     return Result::Success;
+
+_bad_request:
+    {
+	MOMENT_GST__HEADERS_DATE
+	ConstMemory const reply_body = "400 Bad Request";
+	conn_sender->send (
+		self->page_pool,
+		true /* do_flush */,
+		MOMENT_GST__400_HEADERS (reply_body.len()),
+		"\r\n",
+		reply_body);
+	if (!req->getKeepalive())
+	    conn_sender->closeAfterFlush();
+    }
+
+    return Result::Success;
 }
 
 void
@@ -401,7 +494,7 @@ MomentGstModule::parseSourcesConfigSection ()
 
 	    createStreamChannel (stream_name,
 				 stream_uri,
-				 false /* chain */,
+				 false /* is_chain */,
 				 false /* recording */,
 				 ConstMemory() /* record_filename */);
 	}
@@ -479,7 +572,7 @@ MomentGstModule::parseChainsConfigSection ()
 
 	    createStreamChannel (stream_name,
 				 chain_spec,
-				 true /* chain */,
+				 true /* is_chain */,
 				 false /* recording */,
 				 ConstMemory() /* record_filename */);
 	} else
@@ -541,7 +634,7 @@ MomentGstModule::parseChainsConfigSection ()
 
 	    createStreamChannel (stream_name,
 				 chain_spec,
-				 true /* chain */,
+				 true /* is_chain */,
 				 got_record_path /* recording */,
 				 record_path);
 	}
@@ -632,14 +725,14 @@ MomentGstModule::parseStreamsConfigSection ()
 	    if (chain && !chain->isNull()) {
 		createStreamChannel (stream_name->mem(),
 				     chain->mem(),
-				     true /* chain */,
+				     true /* is_chain */,
 				     record_path ? true : false /* recording */,
 				     record_path ? record_path->mem() : ConstMemory());
 	    } else
 	    if (uri && !uri->isNull()) {
 		createStreamChannel (stream_name->mem(),
 				     uri->mem(),
-				     false /* chain */,
+				     false /* is_chain */,
 				     record_path ? true : false /* recording */,
 				     record_path ? record_path->mem() : ConstMemory());
 	    } else
@@ -755,6 +848,21 @@ MomentGstModule::init (MomentServer * const moment)
     }
 
     {
+	ConstMemory const opt_name = "mod_gst/keep_video_streams";
+	MConfig::Config::BooleanValue const val = config->getBoolean (opt_name);
+	if (val == MConfig::Config::Boolean_Invalid) {
+	    logE_ (_func, "Invalid value for ", opt_name, ": ", config->getString (opt_name));
+	    return Result::Failure;
+	}
+
+	if (val == MConfig::Config::Boolean_True) {
+	    keep_video_streams = true;
+	} else {
+	    keep_video_streams = false;
+	}
+    }
+
+    {
 	ConstMemory const opt_name = "mod_gst/width";
 	MConfig::GetResult const res = config->getUint64_default (
 		opt_name, &default_width, default_width);
@@ -799,7 +907,10 @@ MomentGstModule::init (MomentServer * const moment)
     moment->getAdminHttpService()->addHttpHandler (
 	    CbDesc<HttpService::HttpHandler> (
 		    &admin_http_handler, this /* cb_data */, NULL /* coderef_container */),
-	    "moment_admin");
+	    "moment_admin",
+	    true    /* preassembly */,
+	    1 << 20 /* 1 Mb */,
+	    true    /* parse_body_params */);
 
     parseSourcesConfigSection ();
     parseChainsConfigSection ();

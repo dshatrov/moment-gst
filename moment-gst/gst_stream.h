@@ -23,6 +23,7 @@
 
 #include <libmary/types.h>
 #include <gst/gst.h>
+#include <gst/app/gstappsrc.h>
 
 #include <moment/libmoment.h>
 
@@ -54,6 +55,10 @@ private:
     mt_const Timers *timers;
     mt_const PagePool *page_pool;
     mt_const Ref<VideoStream> video_stream;
+    mt_const Ref<VideoStream> mix_video_stream;
+
+    mt_const GstCaps *mix_audio_caps;
+    mt_const GstCaps *mix_video_caps;
 
     mt_const Ref<String> stream_spec;
     mt_const bool is_chain;
@@ -66,7 +71,7 @@ private:
 
     mt_const Time no_video_timeout;
 
-    mt_mutex (ctl_mutex)
+    mt_mutex (mutex)
     mt_begin
 
       Timers::TimerKey no_video_timer;
@@ -74,6 +79,9 @@ private:
       GstElement *playbin;
       gulong audio_probe_id;
       gulong video_probe_id;
+
+      GstAppSrc *mix_audio_src;
+      GstAppSrc *mix_video_src;
 
       Time initial_seek;
       bool initial_seek_pending;
@@ -182,6 +190,18 @@ private:
 
     static void noVideoTimerTick (void *_self);
 
+  mt_iface (VideoStream::EventHandler)
+
+    static VideoStream::EventHandler mix_stream_handler;
+
+    static void mixStreamAudioMessage (VideoStream::AudioMessage * mt_nonnull audio_msg,
+				       void *_self);
+
+    static void mixStreamVideoMessage (VideoStream::VideoMessage * mt_nonnull video_msg,
+				       void *_self);
+
+  mt_iface_end
+
 public:
     void createPipeline ();
 
@@ -200,6 +220,7 @@ public:
 			Timers         *timers,
 			PagePool       *page_pool,
 			VideoStream    *video_stream,
+			VideoStream    *mix_video_stream,
 			Time            initial_seek,
 			bool            send_metadata,
 			Uint64          default_width,

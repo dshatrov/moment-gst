@@ -29,7 +29,7 @@ static LogGroup libMary_logGroup_chains ("moment-gst_chains", LogLevel::I);
 static LogGroup libMary_logGroup_pipeline ("moment-gst_pipeline", LogLevel::I);
 static LogGroup libMary_logGroup_stream ("moment-gst_stream", LogLevel::I);
 static LogGroup libMary_logGroup_bus ("moment-gst_bus", LogLevel::I);
-static LogGroup libMary_logGroup_frames ("moment-gst_frames", LogLevel::I); // E is the default
+static LogGroup libMary_logGroup_frames ("moment-gst_frames", LogLevel::E); // E is the default
 static LogGroup libMary_logGroup_novideo ("moment-gst_novideo", LogLevel::I);
 
 void
@@ -42,6 +42,8 @@ GstStream::createPipelineForChainSpec ()
     GstElement *chain_el = NULL;
     GstElement *video_el = NULL;
     GstElement *audio_el = NULL;
+    GstElement *mix_video_el = NULL;
+    GstElement *mix_audio_el = NULL;
 
   {
     GError *error = NULL;
@@ -134,6 +136,18 @@ GstStream::createPipelineForChainSpec ()
 	}
     }
 
+    mix_audio_el = gst_bin_get_by_name (GST_BIN (chain_el), "mix_audio");
+    if (mix_audio_el) {
+	mix_audio_src = GST_APP_SRC (mix_audio_el);
+	g_object_ref (mix_audio_src);
+    }
+
+    mix_video_el = gst_bin_get_by_name (GST_BIN (chain_el), "mix_video");
+    if (mix_video_el) {
+	mix_video_src = GST_APP_SRC (mix_video_el);
+	g_object_ref (mix_video_src);
+    }
+
     logD (chains, _func, "chain \"", stream_name, "\" created");
 
     if (!mt_unlocks (mutex) setPipelinePlaying ()) {
@@ -154,6 +168,10 @@ _return:
 	gst_object_unref (video_el);
     if (audio_el)
 	gst_object_unref (audio_el);
+    if (mix_video_el)
+	gst_object_unref (mix_video_el);
+    if (mix_audio_el)
+	gst_object_unref (mix_audio_el);
 }
 
 void
@@ -483,6 +501,12 @@ GstStream::pipelineCreationFailed ()
     GstElement * const tmp_playbin = playbin;
     playbin = NULL;
 
+    GstElement * const tmp_mix_audio_src = GST_ELEMENT (mix_audio_src);
+    mix_audio_src = NULL;
+
+    GstElement * const tmp_mix_video_src = GST_ELEMENT (mix_video_src);
+    mix_video_src = NULL;
+
     eos_pending = true;
 
     mutex.unlock ();
@@ -497,6 +521,12 @@ GstStream::pipelineCreationFailed ()
 
 	gst_object_unref (tmp_playbin);
     }
+
+    if (tmp_mix_audio_src)
+	gst_object_unref (tmp_mix_audio_src);
+
+    if (tmp_mix_video_src)
+	gst_object_unref (tmp_mix_video_src);
 }
 
 void
@@ -514,6 +544,12 @@ GstStream::releasePipeline ()
     GstElement * const tmp_playbin = playbin;
     playbin = NULL;
 
+    GstElement * const tmp_mix_audio_src = GST_ELEMENT (mix_audio_src);
+    mix_audio_src = NULL;
+
+    GstElement * const tmp_mix_video_src = GST_ELEMENT (mix_video_src);
+    mix_video_src = NULL;
+
     bool to_null_state = false;
     if (!changing_state_to_playing)
 	to_null_state = true;
@@ -530,6 +566,12 @@ GstStream::releasePipeline ()
 
 	gst_object_unref (tmp_playbin);
     }
+
+    if (tmp_mix_audio_src)
+	gst_object_unref (tmp_mix_audio_src);
+
+    if (tmp_mix_video_src)
+	gst_object_unref (tmp_mix_video_src);
 }
 
 mt_mutex (mutex) void
@@ -1255,8 +1297,10 @@ GstStream::doVideoData (GstBuffer * const buffer)
 	page_pool->msgUnref (page_list.first);
     }
 
-    if (skip_frame)
+    if (skip_frame) {
+	logD (frames, "skipping frame");
 	return;
+    }
 
     Size msg_len = 0;
 
@@ -1355,6 +1399,7 @@ GstStream::doVideoData (GstBuffer * const buffer)
     msg.msg_len = msg_len;
     msg.msg_offset = 0;
 
+//    logD_ (_func, "firing video message, ", msg_len, " bytes");
     video_stream->fireVideoMessage (&msg);
 
     page_pool->msgUnref (page_list.first);
@@ -1549,6 +1594,101 @@ GstStream::noVideoTimerTick (void * const _self)
     }
 }
 
+VideoStream::EventHandler GstStream::mix_stream_handler = {
+    mixStreamAudioMessage,
+    mixStreamVideoMessage,
+    NULL /* rtmpCommandMessage */,
+    NULL /* closed */
+};
+
+void
+GstStream::mixStreamAudioMessage (VideoStream::AudioMessage * const mt_nonnull audio_msg,
+				  void * const _self)
+{
+    GstStream * const self = static_cast <GstStream*> (_self);
+
+    logD_ (_func_);
+
+    self->mutex.lock ();
+    if (!self->mix_audio_src) {
+	self->mutex.unlock ();
+	return;
+    }
+
+  // TODO
+
+    self->mutex.unlock ();
+}
+
+void
+GstStream::mixStreamVideoMessage (VideoStream::VideoMessage * const mt_nonnull video_msg,
+				  void * const _self)
+{
+    GstStream * const self = static_cast <GstStream*> (_self);
+
+    logD_ (_func_);
+
+    self->mutex.lock ();
+    if (!self->mix_video_src) {
+	self->mutex.unlock ();
+	return;
+    }
+
+    GstBuffer * const buffer = gst_buffer_new_and_alloc (video_msg->msg_len);
+    assert (buffer);
+
+    {
+	PagePool *normalized_page_pool;
+	PagePool::PageListHead normalized_pages;
+	Size normalized_offset = 0;
+	bool unref_normalized_pages;
+	if (video_msg->prechunk_size == 0) {
+	    logD_ (_func, "non-prechunked data");
+
+	    normalized_pages = video_msg->page_list;
+	    unref_normalized_pages = false;
+	} else {
+	    logD_ (_func, "prechunked data");
+
+	    unref_normalized_pages = true;
+
+	    RtmpConnection::normalizePrechunkedData (video_msg->page_pool,
+						     &video_msg->page_list,
+						     video_msg->msg_offset,
+						     video_msg->prechunk_size,
+						     video_msg->page_pool,
+						     &normalized_page_pool,
+						     &normalized_pages,
+						     &normalized_offset);
+	    // TODO This assertion should become unnecessary (support msg_offs
+	    //      in PagePool::PageListArray).
+	    assert (normalized_offset == 0);
+	}
+
+	PagePool::PageListArray pl_array (normalized_pages.first, video_msg->msg_len);
+	if (video_msg->msg_len > 0)
+	    pl_array.get (1 /* TEST FLV VIDEO TAG STRIPPING */ /* offset */, Memory (GST_BUFFER_DATA (buffer), video_msg->msg_len - 1));
+
+	if (unref_normalized_pages)
+	    normalized_page_pool->msgUnref (normalized_pages.first);
+    }
+
+    gst_buffer_set_caps (buffer, self->mix_video_caps);
+    GST_BUFFER_TIMESTAMP (buffer) = (Uint64) video_msg->timestamp * 1000000;
+    GST_BUFFER_SIZE (buffer) = video_msg->msg_len;
+    GST_BUFFER_DURATION (buffer) = 0;
+
+    if (video_msg->frame_type.isInterFrame())
+	GST_BUFFER_FLAG_SET (buffer, GST_BUFFER_FLAG_DELTA_UNIT);
+
+    logD_ (_func, "pushing buffer");
+    GstFlowReturn const res = gst_app_src_push_buffer (self->mix_video_src, buffer);
+    if (res != GST_FLOW_OK)
+	logD_ (_func, "res: ", (unsigned long) res);
+
+    self->mutex.unlock ();
+}
+
 void
 GstStream::createPipeline ()
 {
@@ -1636,6 +1776,7 @@ GstStream::reportStatusEvents ()
 		logD (stream, _func, "initial_seek: ", initial_seek);
 
 		Time const tmp_initial_seek = initial_seek;
+
 		GstElement * const tmp_playbin = playbin;
 		gst_object_ref (tmp_playbin);
 		mutex.unlock ();
@@ -1693,6 +1834,7 @@ GstStream::init (ConstMemory   const stream_name,
 		 Timers      * const timers,
 		 PagePool    * const page_pool,
 		 VideoStream * const video_stream,
+		 VideoStream * const mix_video_stream,
 		 Time          const initial_seek,
 		 bool          const send_metadata,
 		 Uint64        const default_width,
@@ -1708,6 +1850,7 @@ GstStream::init (ConstMemory   const stream_name,
     this->timers = timers;
     this->page_pool = page_pool;
     this->video_stream = video_stream;
+    this->mix_video_stream = mix_video_stream;
 
     this->send_metadata = send_metadata;
 
@@ -1718,12 +1861,40 @@ GstStream::init (ConstMemory   const stream_name,
     this->no_video_timeout = no_video_timeout;
 
     this->initial_seek = initial_seek;
+
+    if (mix_video_stream) {
+	mix_audio_caps = gst_caps_new_simple ("audio/x-speex",
+#if 0
+					      "rate", G_TYPE_INT, 16000,
+					      "channels", G_TYPE_INT, 1,
+#endif
+					      NULL);
+
+//	mix_video_caps = gst_caps_new_simple ("video/x-flv",
+	mix_video_caps = gst_caps_new_simple ("video/x-flash-video",
+#if 0
+					      "width",  G_TYPE_INT, (int) default_width,
+					      "height", G_TYPE_INT, (int) default_height,
+#endif
+					      "pixel-aspect-ratio", GST_TYPE_FRACTION, 1, 1,
+					      NULL);
+
+	mix_video_stream->getEventInformer()->subscribe (
+		CbDesc<VideoStream::EventHandler> (
+			&mix_stream_handler,
+			this,
+			this));
+    }
 }
 
 GstStream::GstStream ()
     : timers (NULL),
       page_pool (NULL),
       video_stream (NULL),
+      mix_video_stream (NULL),
+
+      mix_audio_caps (NULL),
+      mix_video_caps (NULL),
 
       is_chain (false),
 
@@ -1740,6 +1911,9 @@ GstStream::GstStream ()
       playbin (NULL),
       audio_probe_id (0),
       video_probe_id (0),
+
+      mix_audio_src (NULL),
+      mix_video_src (NULL),
 
       initial_seek (0),
       initial_seek_pending (true),
@@ -1786,6 +1960,11 @@ GstStream::~GstStream ()
     logD (pipeline, _func, "~GstStream()");
 
     releasePipeline ();
+
+    if (mix_audio_caps)
+	gst_caps_unref (mix_audio_caps);
+    if (mix_video_caps)
+	gst_caps_unref (mix_video_caps);
 }
 
 }

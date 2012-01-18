@@ -41,7 +41,7 @@ static void glibLoopThreadFunc (void * const /* cb_data */)
 
 static void doMomentGstInit ()
 {
-    logI_ ("Initializing mod_gst");
+    logI_ (_func, "Initializing mod_gst");
 
     MomentServer * const moment = MomentServer::getInstance();
     MConfig::Config * const config = moment->getConfig();
@@ -120,7 +120,7 @@ static void momentGstInit ()
 
 static void momentGstUnload ()
 {
-    logI_ ("Unloading mod_gst");
+    logI_ (_func, "Unloading mod_gst");
 }
 
 } // namespace MomentGst

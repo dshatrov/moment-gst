@@ -143,6 +143,7 @@ public:
     mt_const void init (MomentServer *moment,
 			ConstMemory   channel_name,
 			bool          send_metadata,
+			bool          keep_video_stream,
 			Size          default_width,
 			Size          default_height,
 			Size          default_bitrate,

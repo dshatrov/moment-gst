@@ -76,6 +76,7 @@ private:
   // Defaults
 
     mt_const bool send_metadata;
+    mt_const bool keep_video_stream;
 
     mt_const Uint64 default_width;
     mt_const Uint64 default_height;
@@ -167,6 +168,7 @@ public:
 			DeferredProcessor *deferred_processor,
 			ConstMemory        stream_name,
 			bool               send_metadata,
+			bool               keep_video_stream,
 			Uint64             default_width,
 			Uint64             default_height,
 			Uint64             default_bitrate,
