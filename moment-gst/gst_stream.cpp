@@ -39,7 +39,11 @@ GstStream::createPipelineForChainSpec ()
 
     assert (is_chain);
 
+    if (!stream_spec->mem().len())
+	return;
+
     GstElement *chain_el = NULL;
+    GstElement *in_stats_el = NULL;
     GstElement *video_el = NULL;
     GstElement *audio_el = NULL;
     GstElement *mix_video_el = NULL;
@@ -67,6 +71,27 @@ GstStream::createPipelineForChainSpec ()
 
     playbin = chain_el;
     gst_object_ref (playbin);
+
+    {
+	in_stats_el = gst_bin_get_by_name (GST_BIN (chain_el), "in_stats");
+	if (in_stats_el) {
+	    GstPad * const pad = gst_element_get_static_pad (in_stats_el, "sink");
+	    if (!pad) {
+		logE_ (_func, "element called \"in_stats\" doesn't have a \"sink\" "
+		       "pad. Chain spec: ", stream_spec);
+		goto _failure;
+	    }
+
+	    got_in_stats = true;
+
+	    gst_pad_add_buffer_probe (pad, G_CALLBACK (GstStream::inStatsDataCb), this);
+
+	    gst_object_unref (pad);
+
+	    gst_object_unref (in_stats_el);
+	    in_stats_el = NULL;
+	}
+    }
 
     {
 	audio_el = gst_bin_get_by_name (GST_BIN (chain_el), "audio");
@@ -164,6 +189,8 @@ mt_mutex (mutex) _failure:
 _return:
     if (chain_el)
 	gst_object_unref (chain_el);
+    if (in_stats_el)
+	gst_object_unref (in_stats_el);
     if (video_el)
 	gst_object_unref (video_el);
     if (audio_el)
@@ -178,6 +205,9 @@ void
 GstStream::createPipelineForUri ()
 {
     assert (!is_chain);
+
+    if (!stream_spec->mem().len())
+	return;
 
     GstElement *playbin           = NULL,
 	       *audio_encoder_bin = NULL,
@@ -693,6 +723,20 @@ gstStateToString (GstState const state)
     return grab (new String (mem));
 }
 
+gboolean
+GstStream::inStatsDataCb (GstPad    * const /* pad */,
+			  GstBuffer * const buffer,
+			  gpointer    const _self)
+{
+    GstStream * const self = static_cast <GstStream*> (_self);
+
+    self->mutex.lock ();
+    self->rx_bytes += GST_BUFFER_SIZE (buffer);
+    self->mutex.unlock ();
+
+    return TRUE;
+}
+
 void
 GstStream::doAudioData (GstBuffer * const buffer)
 {
@@ -714,6 +758,8 @@ GstStream::doAudioData (GstBuffer * const buffer)
     }
 
     mutex.lock ();
+
+    rx_audio_bytes += GST_BUFFER_SIZE (buffer);
 
     last_frame_time = getTime ();
     logD (frames, _func, "last_frame_time: 0x", fmt_hex, last_frame_time);
@@ -1132,6 +1178,8 @@ GstStream::doVideoData (GstBuffer * const buffer)
 #endif
 
     mutex.lock ();
+
+    rx_video_bytes += GST_BUFFER_SIZE (buffer);
 
     last_frame_time = getTime ();
     logD (frames, _func, "last_frame_time: 0x", fmt_hex, last_frame_time);
@@ -1590,7 +1638,10 @@ GstStream::noVideoTimerTick (void * const _self)
 
 	self->reportStatusEvents ();
     } else {
+	self->got_video_pending = true;
 	self->mutex.unlock ();
+
+	self->reportStatusEvents ();
     }
 }
 
@@ -1710,10 +1761,11 @@ GstStream::reportStatusEvents ()
     }
     reporting_status_events = true;
 
-    while (eos_pending      ||
-	   error_pending    ||
-	   no_video_pending ||
-	   seek_pending     ||
+    while (eos_pending       ||
+	   error_pending     ||
+	   no_video_pending  ||
+	   got_video_pending ||
+	   seek_pending      ||
 	   play_pending)
     {
 	if (close_notified) {
@@ -1750,6 +1802,9 @@ GstStream::reportStatusEvents ()
 	}
 
 	if (no_video_pending) {
+	    if (got_video_pending)
+		got_video_pending = false;
+
 	    logD (stream, _func, "no_video_pending");
 	    no_video_pending = false;
 	    if (stream_closed) {
@@ -1761,6 +1816,18 @@ GstStream::reportStatusEvents ()
 		logD (stream, _func, "firing NO_VIDEO");
 		mt_unlocks_locks (mutex) frontend.call_mutex (frontend->noVideo, mutex);
 	    }
+	}
+
+	if (got_video_pending) {
+	    logD (stream, _func, "got_video_pending");
+	    got_video_pending = false;
+	    if (stream_closed) {
+		mutex.unlock ();
+		return;
+	    }
+
+	    if (frontend)
+		mt_unlocks_locks (mutex) frontend.call_mutex (frontend->gotVideo, mutex);
 	}
 
 	if (seek_pending) {
@@ -1825,6 +1892,24 @@ GstStream::reportStatusEvents ()
     logD (stream, _func, "done");
     reporting_status_events = false;
     mutex.unlock ();
+}
+
+void
+GstStream::getTrafficStats (TrafficStats * const ret_traffic_stats)
+{
+  StateMutexLock l (mutex);
+
+    ret_traffic_stats->rx_bytes = rx_bytes;
+    ret_traffic_stats->rx_audio_bytes = rx_audio_bytes;
+    ret_traffic_stats->rx_video_bytes = rx_video_bytes;
+}
+
+void
+GstStream::resetTrafficStats ()
+{
+    rx_bytes = 0;
+    rx_audio_bytes = 0;
+    rx_video_bytes = 0;
 }
 
 mt_const void
@@ -1929,6 +2014,7 @@ GstStream::GstStream ()
       video_codec_id (VideoStream::VideoCodecId::Unknown),
       video_hdr (0x02 /* Sorenson H.263 */),
 
+      got_in_stats (false),
       got_video (false),
       got_audio (false),
 
@@ -1947,11 +2033,16 @@ GstStream::GstStream ()
       play_pending (false),
 
       no_video_pending (false),
+      got_video_pending (false),
       error_pending  (false),
       eos_pending    (false),
       close_notified (false),
 
-      stream_closed (false)
+      stream_closed (false),
+
+      rx_bytes (0),
+      rx_audio_bytes (0),
+      rx_video_bytes (0)
 {
 }
 

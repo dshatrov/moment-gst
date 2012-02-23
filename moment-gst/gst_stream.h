@@ -44,6 +44,8 @@ public:
 
 	void (*noVideo) (void *cb_data);
 
+	void (*gotVideo) (void *cb_data);
+
 	// Called with gstreamer locks held.
 	void (*statusEvent) (void *cb_data);
     };
@@ -99,6 +101,7 @@ private:
       VideoStream::VideoCodecId video_codec_id;
       Byte video_hdr;
 
+      bool got_in_stats;
       bool got_video;
       bool got_audio;
 
@@ -127,6 +130,7 @@ private:
       // No "no_video" notifications should be made after error or eos
       // notification for the same GstStream instance.
       bool no_video_pending;
+      bool got_video_pending;
       bool error_pending;
       bool eos_pending;
       // If 'true', then no further notifications for this GstStream
@@ -138,6 +142,13 @@ private:
       // instance has been closed, which means that all associated gstreamer
       // objects should be released.
       bool stream_closed;
+
+      // Bytes received (in_stats_el's sink pad).
+      Uint64 rx_bytes;
+      // Bytes generated (audio fakesink's sink pad).
+      Uint64 rx_audio_bytes;
+      // Bytes generated (video fakesink's sink pad).
+      Uint64 rx_video_bytes;
 
     mt_end
 
@@ -156,30 +167,34 @@ private:
 
     mt_mutex (mutex) void reportMetaData ();
 
+    static gboolean inStatsDataCb (GstPad    *pad,
+				   GstBuffer *buffer,
+				   gpointer   _self);
+
   // Audio data handling
 
     mt_mutex (mutex) void doAudioData (GstBuffer *buffer);
 
-    static gboolean audioDataCb (GstPad    * /* pad */,
+    static gboolean audioDataCb (GstPad    *pad,
 				 GstBuffer *buffer,
 				 gpointer   _self);
 
-    static void handoffAudioDataCb (GstElement * /* element */,
+    static void handoffAudioDataCb (GstElement *element,
 				    GstBuffer  *buffer,
-				    GstPad     * /* pad */,
+				    GstPad     *pad,
 				    gpointer    _self);
 
   // Video data handling
 
     mt_mutex (mutex) void doVideoData (GstBuffer *buffer);
 
-    static gboolean videoDataCb (GstPad    * /* pad */,
+    static gboolean videoDataCb (GstPad    *pad,
 				 GstBuffer *buffer,
 				 gpointer   _self);
 
-    static void handoffVideoDataCb (GstElement * /* element */,
+    static void handoffVideoDataCb (GstElement *element,
 				    GstBuffer  *buffer,
-				    GstPad     * /* pad */,
+				    GstPad     *pad,
 				    gpointer    _self);
 
   // State management
@@ -208,6 +223,34 @@ public:
     void releasePipeline ();
 
     void reportStatusEvents ();
+
+    class TrafficStats
+    {
+    public:
+	Uint64 rx_bytes;
+	Uint64 rx_audio_bytes;
+	Uint64 rx_video_bytes;
+
+	void reset ()
+	{
+	    rx_bytes = 0;
+	    rx_audio_bytes = 0;
+	    rx_video_bytes = 0;
+	}
+
+#if 0
+	TrafficStats (Uint64 const rx_audio_bytes,
+		      Uint64 const rx_video_bytes)
+	    : rx_audio_bytes (rx_audio_bytes),
+	      rx_video_bytes (rx_video_bytes)
+	{
+	}
+#endif
+    };
+
+    void getTrafficStats (TrafficStats *ret_traffic_stats);
+
+    void resetTrafficStats ();
 
     mt_const void setFrontend (CbDesc<Frontend> const &frontend)
     {

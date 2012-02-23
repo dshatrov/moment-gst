@@ -43,6 +43,7 @@ private:
 	mt_const Ref<Channel> channel;
 
 	mt_const Ref<String> channel_name;
+	mt_const Ref<String> channel_desc;
 	mt_const Ref<String> playlist_filename;
     };
 
@@ -106,6 +107,13 @@ private:
 			bool        item_name_is_id,
 			ConstMemory seek_str);
 
+    void printChannelInfoJson (PagePool::PageListHead *page_list,
+			       ChannelEntry           *channel_entry);
+
+    static Result httpGetChannelsStat (HttpRequest  * mt_nonnull req,
+				       Sender       * mt_nonnull conn_sender,
+				       void         *_self);
+
     mt_iface (HttpService::Frontend)
     mt_begin
 
@@ -117,18 +125,31 @@ private:
 				      void        ** mt_nonnull ret_msg_data,
 				      void         *_self);
 
+      static HttpService::HttpHandler http_handler;
+
+      static Result httpRequest (HttpRequest * mt_nonnull req,
+				 Sender       * mt_nonnull conn_sender,
+				 Memory const &msg_body,
+				 void        ** mt_nonnull ret_msg_data,
+				 void         *_self);
+
     mt_end
 
     void createPlaylistChannel (ConstMemory channel_name,
+				ConstMemory channel_desc,
 				ConstMemory playlist_filename,
 				bool        recording,
 				ConstMemory record_filename);
 
     void createStreamChannel (ConstMemory stream_name,
+			      ConstMemory channel_desc,
 			      ConstMemory stream_spec,
 			      bool        is_chain,
 			      bool        recording,
 			      ConstMemory record_filename);
+
+    void createDummyChannel (ConstMemory channel_name,
+			     ConstMemory channel_desc);
 
     void createPlaylistRecorder (ConstMemory recorder_name,
 				 ConstMemory playlist_filename,

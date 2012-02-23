@@ -45,7 +45,7 @@
 	"Content-Length: ", (content_length), "\r\n"
 
 #define MOMENT_GST__404_HEADERS(content_length) \
-	"HTTP/1.1 404 Not found\r\n" \
+	"HTTP/1.1 404 Not Found\r\n" \
 	MOMENT_GST__COMMON_HEADERS \
 	"Content-Type: text/plain\r\n" \
 	"Content-Length: ", (content_length), "\r\n"
@@ -67,6 +67,8 @@ using namespace M;
 using namespace Moment;
 
 namespace MomentGst {
+
+static Ref<String> this_rtmpt_server_addr;
 
 Result
 MomentGstModule::updatePlaylist (ConstMemory   const channel_name,
@@ -157,6 +159,7 @@ MomentGstModule::setPosition (ConstMemory const channel_name,
 
 void
 MomentGstModule::createPlaylistChannel (ConstMemory const channel_name,
+					ConstMemory const channel_desc,
 					ConstMemory const playlist_filename,
 					bool        const recording,
 					ConstMemory const record_filename)
@@ -164,6 +167,7 @@ MomentGstModule::createPlaylistChannel (ConstMemory const channel_name,
     ChannelEntry * const channel_entry = new ChannelEntry;
 
     channel_entry->channel_name = grab (new String (channel_name));
+    channel_entry->channel_desc = grab (new String (channel_desc));
     channel_entry->playlist_filename = grab (new String (playlist_filename));
 
     Ref<Channel> const channel = grab (new Channel);
@@ -195,6 +199,7 @@ MomentGstModule::createPlaylistChannel (ConstMemory const channel_name,
 
 void
 MomentGstModule::createStreamChannel (ConstMemory const channel_name,
+				      ConstMemory const channel_desc,
 				      ConstMemory const stream_spec,
 				      bool        const is_chain,
 				      bool        const recording,
@@ -205,6 +210,7 @@ MomentGstModule::createStreamChannel (ConstMemory const channel_name,
     ChannelEntry * const channel_entry = new ChannelEntry;
 
     channel_entry->channel_name = grab (new String (channel_name));
+    channel_entry->channel_desc = grab (new String (channel_desc));
     channel_entry->playlist_filename = NULL;
 
     Ref<Channel> const channel = grab (new Channel);
@@ -228,6 +234,35 @@ MomentGstModule::createStreamChannel (ConstMemory const channel_name,
 
     if (recording)
 	createChannelRecorder (channel_name, channel_name, record_filename);
+}
+
+void
+MomentGstModule::createDummyChannel (ConstMemory const channel_name,
+				     ConstMemory const channel_desc)
+{
+    ChannelEntry * const channel_entry = new ChannelEntry;
+    channel_entry->channel_name = grab (new String (channel_name));
+    channel_entry->channel_desc = grab (new String (channel_desc));
+    channel_entry->playlist_filename = NULL;
+
+    Ref<Channel> const channel = grab (new Channel);
+    channel_entry->channel = channel;
+
+    channel->init (moment,
+		   channel_name,
+		   send_metadata,
+		   keep_video_streams,
+		   default_width,
+		   default_height,
+		   default_bitrate,
+		   no_video_timeout);
+
+    mutex.lock ();
+    channel_entry_hash.add (channel_entry);
+    mutex.unlock ();
+    channel_set.addChannel (channel, channel_name);
+
+    channel->setSingleItem (ConstMemory(), true /* is_chain */);
 }
 
 void
@@ -289,6 +324,183 @@ HttpService::HttpHandler MomentGstModule::admin_http_handler = {
     NULL /* httpMessageBody */
 };
 
+void
+MomentGstModule::printChannelInfoJson (PagePool::PageListHead * const page_list,
+				       ChannelEntry           * const channel_entry)
+{
+    static char const open_str []  = "[ \"";
+    page_pool->getFillPages (page_list, open_str);
+
+    page_pool->getFillPages (page_list, channel_entry->channel_name->mem());
+
+    static char const sep_a [] = "\", \"";
+    page_pool->getFillPages (page_list, sep_a);
+
+    page_pool->getFillPages (page_list, channel_entry->channel_desc->mem());
+
+    page_pool->getFillPages (page_list, sep_a);
+
+    {
+	if (channel_entry->channel
+	    && channel_entry->channel->isSourceOnline())
+	{
+	    page_pool->getFillPages (page_list, "ONLINE");
+	} else {
+	    page_pool->getFillPages (page_list, "OFFLINE");
+	}
+    }
+
+    static char const close_str [] = "\" ]";
+    page_pool->getFillPages (page_list, close_str);
+}
+
+Result
+MomentGstModule::httpGetChannelsStat (HttpRequest  * const mt_nonnull req,
+				      Sender       * const mt_nonnull conn_sender,
+				      void         * const _self)
+{
+    MomentGstModule * const self = static_cast <MomentGstModule*> (_self);
+
+    MOMENT_GST__HEADERS_DATE
+
+    PagePool::PageListHead page_list;
+
+    static char const prefix [] =
+	    "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+	    "<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Strict//EN\" \"http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd\">\n"
+	    "<html style=\"height: 100%\" xmlns=\"http://www.w3.org/1999/xhtml\">\n"
+	    "<head>\n"
+	    "  <meta http-equiv=\"Content-Type\" content=\"text/html; charset=UTF-8\"/>\n"
+	    "  <title>Traffic stats</title>\n"
+	    "  <style type=\"text/css\">\n"
+	    "    .top_table      { border-right: 1px solid #777777; border-bottom: 1px solid #777777;\n"
+            "                      margin-top: 5px; }\n"
+	    "    .top_table td   { border-left:  1px solid #777777; border-top:    1px solid #777777; padding: 3px; }\n"
+	    "    .inner_table    { border: 0; }\n"
+	    "    .inner_table td { border: 0; padding: 0; }\n"
+	    "    .total td       { border-top:   2px solid #444444; }\n"
+	    "  </style>\n"
+	    "</head>\n"
+	    "<body style=\"font-family: sans-serif\">\n"
+	    "<form name=\"reset\" action=\"channels_stat_reset\" method=\"post\">\n"
+	    "  <input type=\"submit\" value=\"Сброс статистики\">\n"
+	    "</form>\n"
+	    "<table class=\"top_table\" border=\"0\" cellpadding=\"0\" cellspacing=\"0\">\n"
+	    "<tr>\n"
+	    "<td>Канал</td><td>Описание</td><td>Время<sup>1</sup> ЧЧ:ММ</td><td>Время<sup>1</sup>, сек</td>"
+	    "<td>Ширина канала<sup>2</sup>, Мбит/сек</td>"
+	    "<td>Получено<sup>3</sup>, ГБайт</td><td>Получено<sup>3</sup>, байт</td><td>Ген.<sup>4</sup>, Мбит/сек</td>"
+	    "<td>Видео<sup>5</sup>, байт</td><td>Аудио<sup>6</sup>, байт</td>\n"
+	    "</tr>\n";
+
+    static char const suffix [] =
+	    "</table>\n"
+	    "<p>1 &mdash; Время, прошедшее с момента создания канала, включая время, когда камера была недоступна;<br/>\n"
+	    "2 &mdash; Усреднённая скорость поступления видеоданных от камеры. Ширина = Получено / Время;<br/>\n"
+	    "3 &mdash; Объём полученных с камеры видео/аудиоданных. Накладные расходы транспортных протоколов (HTTP, RTSP) не включены;<br/>\n"
+	    "4 &mdash; Усреднённый битрейт генерируемого видеопотока, т.е. потока, который будет отдан смотрящим клиентам;<br/>\n"
+	    "5 &mdash; Общий объём перекодированного видео, подготовленного для отдачи клиентам (только видео, без аудио);<br/>\n"
+	    "6 &mdash; Общий объём аудио, подготовленного для отдачи клиентам.</p>\n"
+	    "</body>\n"
+	    "</html>\n";
+
+    self->page_pool->getFillPages (&page_list, ConstMemory (prefix, sizeof (prefix) - 1));
+
+    self->mutex.lock ();
+
+    double width_total = 0.0;
+    double rx_total = 0.0;
+    {
+	ChannelEntryHash::iter iter (self->channel_entry_hash);
+	while (!self->channel_entry_hash.iter_done (iter)) {
+	    ChannelEntry * const channel_entry = self->channel_entry_hash.iter_next (iter);
+
+	    if (!channel_entry->channel)
+		continue;
+
+	    GstStreamCtl::TrafficStats traffic_stats;
+	    channel_entry->channel->getTrafficStats (&traffic_stats);
+	    Uint64 const rx_bytes = traffic_stats.rx_bytes;
+
+	    double const width =
+		    traffic_stats.time_elapsed != 0 ?
+			    (double) rx_bytes / (double) traffic_stats.time_elapsed * 8.0 / (1024.0 * 1024.0) : 0.0;
+
+	    width_total += width;
+	    rx_total += (double) rx_bytes;
+
+	    Format fmt_time;
+	    fmt_time.min_digits = 2;
+	    Format fmt;
+	    fmt.precision = 3;
+	    Ref<String> const line_str = makeString (
+		    "<tr>"
+		    "<td>"
+		    "  <table class=\"inner_table\" border=\"0\" cellpadding=\"0\" cellspacing=\"0\"><tr>\n"
+		    "    <td style=\"padding-right: 3px\">\n"
+		    "      <form name=\"reset\" action=\"channel_reconnect?name=", channel_entry->channel_name->mem(), "\" method=\"post\">\n"
+		    "        <input type=\"submit\" value=\"Переподкл.\">\n"
+		    "      </form>\n"
+		    "    </td>\n"
+		    "    <td>", channel_entry->channel_name->mem(), "</td>\n"
+		    "  </tr></table>\n"
+		    "</td>\n"
+		    "<td>", channel_entry->channel_desc->mem(), "</td>"
+		    "<td>", fmt_time, traffic_stats.time_elapsed / 3600, ":", (traffic_stats.time_elapsed % 3600) / 60, "</td>"
+		    "<td>", fmt_def, traffic_stats.time_elapsed, "</td>"
+		    "<td>", fmt, width, "</td>"
+		    "<td>", (double) rx_bytes / (1024.0 * 1024.0 * 1024.0), "</td>"
+		    "<td>", rx_bytes, "</td>"
+		    "<td>", (traffic_stats.time_elapsed != 0 ?
+				    (double) (traffic_stats.rx_video_bytes + traffic_stats.rx_audio_bytes) /
+					    (double) traffic_stats.time_elapsed * 8.0 / (1024.0 * 1024.0) : 0), "</td>"
+		    "<td>", traffic_stats.rx_video_bytes, "</td>"
+		    "<td>", traffic_stats.rx_audio_bytes, "</td>"
+		    "</tr>");
+	    self->page_pool->getFillPages (&page_list, line_str->mem());
+	}
+    }
+    {
+	Format fmt;
+	fmt.precision = 3;
+	Ref<String> const line_str = makeString (
+		"<tr class=\"total\">"
+		"<td colspan=\"2\"><b>Всего:</b></td>"
+		"<td/>"
+		"<td/>"
+		"<td>", fmt, width_total, "</td>"
+		"<td>", rx_total / (1024.0 * 1024.0 * 1024.0), "</td>"
+		"<td></td>"
+		"<td></td>"
+		"<td></td>"
+		"<td></td>"
+		"</tr>");
+	self->page_pool->getFillPages (&page_list, line_str->mem());
+    }
+
+    self->mutex.unlock ();
+
+    self->page_pool->getFillPages (&page_list, ConstMemory (suffix, sizeof (suffix) - 1));
+
+    Size content_len = 0;
+    {
+	PagePool::Page *page = page_list.first;
+	while (page) {
+	    content_len += page->data_len;
+	    page = page->getNextMsgPage();
+	}
+    }
+
+    conn_sender->send (self->page_pool,
+		       false /* do_flush */,
+		       MOMENT_GST__OK_HEADERS ("text/html", content_len),
+		       "\r\n");
+    conn_sender->sendPages (self->page_pool, &page_list, true /* do_flush */);
+
+    logA_ ("mod_gst 200 ", req->getClientAddress(), " ", req->getRequestLine());
+    return Result::Success;
+}
+
 Result
 MomentGstModule::adminHttpRequest (HttpRequest  * const mt_nonnull req,
 				   Sender       * const mt_nonnull conn_sender,
@@ -305,8 +517,6 @@ MomentGstModule::adminHttpRequest (HttpRequest  * const mt_nonnull req,
     if (req->getNumPathElems() >= 2
 	&& equal (req->getPath (1), "set_channel"))
     {
-      // TODO
-
 	ConstMemory const channel_name = req->getParameter ("name");
 	if (channel_name.mem() == NULL) {
 	    logE_ (_func, "set_channel: no channel name (\"name\" parameter)\n");
@@ -321,29 +531,42 @@ MomentGstModule::adminHttpRequest (HttpRequest  * const mt_nonnull req,
 	ConstMemory const src_playlist = req->getParameter ("src_playlist");
 
 	{
-	  unsigned count = 0;
-	  if (src_chain.len())
-	    ++count;
-	  if (src_path.len())
-	    ++count;
-	  if (src_uri.len())
-	    ++count;
-	  if (src_playlist.len())
-	    ++count;
+	    logD_ (_func, "set_channel:");
+	    if (src_chain.len())
+		logD_ (_func, "    src_chain: ", src_chain);
+	    if (src_path.len())
+		logD_ (_func, "    src_path: ", src_path);
+	    if (src_uri.len())
+		logD_ (_func, "    src_uri: ", src_uri);
+	    if (src_playlist.len())
+		logD_ (_func, "    src_playlist: ", src_playlist);
+	}
 
-	  if (count == 0) {
-	    logE_ (_func, "set_channel: no video source");
-	    goto _bad_request;
-	  }
+	{
+	    unsigned count = 0;
+	    if (src_chain.len())
+		++count;
+	    if (src_path.len())
+		++count;
+	    if (src_uri.len())
+		++count;
+	    if (src_playlist.len())
+		++count;
 
-	  if (count > 1) {
-	    logE_ (_func, "set_channel: multiple video sources in a single request");
-	    goto _bad_request;
-	  }
+	    if (count == 0) {
+		logE_ (_func, "set_channel: no video source");
+		goto _bad_request;
+	    }
+
+	    if (count > 1) {
+		logE_ (_func, "set_channel: multiple video sources in a single request");
+		goto _bad_request;
+	    }
 	}
 
 	if (src_chain.len()) {
 	    self->createStreamChannel (channel_name,
+				       ConstMemory() /* channel_desc */,
 				       src_chain,
 				       true /* is_chain */,
 				       false /* recording */,
@@ -351,6 +574,7 @@ MomentGstModule::adminHttpRequest (HttpRequest  * const mt_nonnull req,
 	} else
 	if (src_path.len()) {
 	    self->createStreamChannel (channel_name,
+				       ConstMemory() /* channel_desc */,
 				       makeString ("file://", src_path)->mem(),
 				       false /* is_chain */,
 				       false /* recording */,
@@ -358,6 +582,7 @@ MomentGstModule::adminHttpRequest (HttpRequest  * const mt_nonnull req,
 	} else
 	if (src_uri.len()) {
 	    self->createStreamChannel (channel_name,
+				       ConstMemory() /* channel_desc */,
 				       src_uri,
 				       false /* is_chain */,
 				       false /* recording */,
@@ -365,6 +590,7 @@ MomentGstModule::adminHttpRequest (HttpRequest  * const mt_nonnull req,
 	} else
 	if (src_playlist.len()) {
 	    self->createPlaylistChannel (channel_name,
+					 ConstMemory() /* channel_desc */,
 					 src_playlist,
 					 false /* recording */,
 					 ConstMemory() /* record_path */);
@@ -373,7 +599,7 @@ MomentGstModule::adminHttpRequest (HttpRequest  * const mt_nonnull req,
     if (req->getNumPathElems() >= 2
 	&& equal (req->getPath (1), "delete_channel"))
     {
-      // TODO
+	// TODO
     } else
     if (req->getNumPathElems() == 3
     && (equal (req->getPath (1), "update_playlist") ||
@@ -432,6 +658,155 @@ MomentGstModule::adminHttpRequest (HttpRequest  * const mt_nonnull req,
 			   reply_body);
 
 	logA_ ("gst_admin 200 ", req->getClientAddress(), " ", req->getRequestLine());
+    } else
+    if (req->getNumPathElems() >= 2
+	&& equal (req->getPath (1), "channel_info"))
+    {
+	ConstMemory const channel_name = req->getParameter ("name");
+	if (channel_name.mem() == NULL) {
+	    logE_ (_func, "set_channel: no channel name (\"name\" parameter)\n");
+	    goto _bad_request;
+	}
+
+	self->mutex.lock ();
+
+	ChannelEntry * const channel_entry = self->channel_entry_hash.lookup (channel_name);
+	if (!channel_entry) {
+	    self->mutex.unlock ();
+	    logE_ (_func, "Channel not found: ", channel_name);
+	    return Result::Failure;
+	}
+
+	PagePool::PageListHead page_list;
+	self->printChannelInfoJson (&page_list, channel_entry);
+
+	self->mutex.unlock ();
+
+      // TODO Below is the common code for finishing HTTP requests.
+      //      Put it into an utility method.
+
+	Size content_len = 0;
+	{
+	    PagePool::Page *page = page_list.first;
+	    while (page) {
+		content_len += page->data_len;
+		page = page->getNextMsgPage();
+	    }
+	}
+
+	conn_sender->send (self->page_pool,
+			   false /* do_flush */,
+			   MOMENT_GST__OK_HEADERS ("text/plain", content_len),
+			   "\r\n");
+	conn_sender->sendPages (self->page_pool, &page_list, true /* do_flush */);
+
+	logA_ ("mod_gst 200 ", req->getClientAddress(), " ", req->getRequestLine());
+    } else
+    if (req->getNumPathElems() >= 2
+	&& equal (req->getPath (1), "channel_list"))
+    {
+	PagePool::PageListHead page_list;
+
+	static char const prefix [] = "[\n";
+	self->page_pool->getFillPages (&page_list, prefix);
+
+	self->mutex.lock ();
+
+	{
+	    ChannelEntryHash::iter iter (self->channel_entry_hash);
+	    while (!self->channel_entry_hash.iter_done (iter)) {
+		ChannelEntry * const channel_entry = self->channel_entry_hash.iter_next (iter);
+
+		self->printChannelInfoJson (&page_list, channel_entry);
+
+		static char const comma_str [] = ",\n";
+		self->page_pool->getFillPages (&page_list, comma_str);
+	    }
+	}
+
+	self->mutex.unlock ();
+
+	static char const suffix [] = "]\n";
+	self->page_pool->getFillPages (&page_list, suffix);
+
+	Size content_len = 0;
+	{
+	    PagePool::Page *page = page_list.first;
+	    while (page) {
+		content_len += page->data_len;
+		page = page->getNextMsgPage();
+	    }
+	}
+
+	conn_sender->send (self->page_pool,
+			   false /* do_flush */,
+			   MOMENT_GST__OK_HEADERS ("text/plain", content_len),
+			   "\r\n");
+	conn_sender->sendPages (self->page_pool, &page_list, true /* do_flush */);
+
+	logA_ ("mod_gst 200 ", req->getClientAddress(), " ", req->getRequestLine());
+    } else
+    if (req->getNumPathElems() >= 2
+	&& equal (req->getPath (1), "channels_stat_reset"))
+    {
+	{
+	    ChannelEntryHash::iter iter (self->channel_entry_hash);
+	    while (!self->channel_entry_hash.iter_done (iter)) {
+		ChannelEntry * const channel_entry = self->channel_entry_hash.iter_next (iter);
+
+		if (!channel_entry->channel)
+		    continue;
+
+		channel_entry->channel->resetTrafficStats();
+	    }
+	}
+
+	conn_sender->send (self->page_pool,
+			   true /* do_flush */,
+			   "HTTP/1.1 302 Found\r\n"
+			   "Location: channels_stat\r\n"
+			   "Content-length: 0\r\n"
+			   "\r\n");
+	logA_ ("mod_gst 302 ", req->getClientAddress(), " ", req->getRequestLine());
+    } else
+    if (req->getNumPathElems() >= 2
+	&& equal (req->getPath (1), "channel_reconnect"))
+    {
+	ConstMemory const channel_name = req->getParameter ("name");
+	if (channel_name.mem() == NULL) {
+	    logE_ (_func, "set_channel: no channel name (\"name\" parameter)\n");
+	    goto _channel_reconnect__done;
+	}
+
+	self->mutex.lock ();
+
+	{
+	    ChannelEntry * const channel_entry = self->channel_entry_hash.lookup (channel_name);
+	    if (!channel_entry) {
+		self->mutex.unlock ();
+		logE_ (_func, "Channel not found: ", channel_name);
+		goto _channel_reconnect__done;
+	    }
+
+	    channel_entry->channel->restartStream ();
+//	    channel_entry->channel->resetTrafficStats ();
+	}
+
+	self->mutex.unlock ();
+
+_channel_reconnect__done:
+	conn_sender->send (self->page_pool,
+			   true /* do_flush */,
+			   "HTTP/1.1 302 Found\r\n"
+			   "Location: channels_stat\r\n"
+			   "Content-length: 0\r\n"
+			   "\r\n");
+	logA_ ("mod_gst 302 ", req->getClientAddress(), " ", req->getRequestLine());
+    } else
+    if (req->getNumPathElems() >= 2
+	&& equal (req->getPath (1), "channels_stat"))
+    {
+	return httpGetChannelsStat (req, conn_sender, _self);
     } else {
 	logE_ (_func, "Unknown admin HTTP request: ", req->getFullPath());
 
@@ -452,6 +827,187 @@ _bad_request:
     {
 	MOMENT_GST__HEADERS_DATE
 	ConstMemory const reply_body = "400 Bad Request";
+	conn_sender->send (
+		self->page_pool,
+		true /* do_flush */,
+		MOMENT_GST__400_HEADERS (reply_body.len()),
+		"\r\n",
+		reply_body);
+	if (!req->getKeepalive())
+	    conn_sender->closeAfterFlush();
+    }
+
+    return Result::Success;
+}
+
+HttpService::HttpHandler MomentGstModule::http_handler = {
+    httpRequest,
+    NULL /* httpMessageBody */
+};
+
+Result
+MomentGstModule::httpRequest (HttpRequest  * const mt_nonnull req,
+			      Sender       * const mt_nonnull conn_sender,
+			      Memory const & /* msg_body */,
+			      void        ** const mt_nonnull /* ret_msg_data */,
+			      void         * const _self)
+{
+    MomentGstModule * const self = static_cast <MomentGstModule*> (_self);
+
+    logD_ (_func_);
+
+    MOMENT_GST__HEADERS_DATE
+
+    if (req->getNumPathElems() >= 2
+	&& equal (req->getPath (1), "wall"))
+    {
+	PagePool::PageListHead page_list;
+
+	static char const prefix [] =
+		"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+		"<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Strict//EN\" \"http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd\">\n"
+		"<html style=\"height: 100%\" xmlns=\"http://www.w3.org/1999/xhtml\">\n"
+		"<head>\n"
+		"  <meta http-equiv=\"Content-Type\" content=\"text/html; charset=UTF-8\"/>\n"
+		"  <title>Wall</title>\n"
+		"</head>\n"
+		"<body bgcolor=\"#444444\" style=\"font-family: sans-serif\">\n"
+		"<table border=\"0\" cellpadding=\"0\" cellspacing=\"0\">\n";
+
+	static char const suffix [] =
+		"</table>\n"
+		"</body>\n"
+		"</html>\n";
+
+	self->page_pool->getFillPages (&page_list, ConstMemory (prefix, sizeof (prefix) - 1));
+
+	self->mutex.lock ();
+
+	{
+	    ChannelEntryHash::iter iter (self->channel_entry_hash);
+	    unsigned row_cnt = 0;
+	    unsigned const row_size = 3;
+	    while (!self->channel_entry_hash.iter_done (iter)) {
+		ChannelEntry * const channel_entry = self->channel_entry_hash.iter_next (iter);
+
+		if (row_cnt == 0) {
+		    static char const row_prefix [] = "<tr>\n";
+		    self->page_pool->getFillPages (&page_list, ConstMemory (row_prefix, sizeof (row_prefix) - 1));
+		}
+
+		Ref<String> const flashvars = makeString (
+			"server=rtmpt://", this_rtmpt_server_addr->mem(),
+			"&stream=", channel_entry->channel_name->mem(),
+			"?paused&play_duration=20&buffer=0.0&shadow=0.4");
+
+		static char const entry_a [] =
+		        "<td style=\"vertical-align: top\">\n"
+			"<div style=\"position: relative; width: 320px; height: 240px; margin-left: auto; margin-right: auto\">\n"
+			"  <object classid=\"clsid:d27cdb6e-ae6d-11cf-96b8-444553540000\"\n"
+			"        width=\"100%\"\n"
+			"        height=\"100%\"\n"
+			"        id=\"BasicPlayer\"\n"
+			"        align=\"Default\">\n"
+			"    <param name=\"movie\" value=\"/basic/BasicPlayer.swf\"/>\n"
+			"    <param name=\"bgcolor\" value=\"#000000\"/>\n"
+			"    <param name=\"scale\" value=\"noscale\"/>\n"
+			"    <param name=\"quality\" value=\"high\"/>\n"
+			"    <param name=\"allowfullscreen\" value=\"true\"/>\n"
+			"    <param name=\"allowscriptaccess\" value=\"always\"/>\n"
+			"    <param name=\"FlashVars\" value=\"";
+		self->page_pool->getFillPages (&page_list, ConstMemory (entry_a, sizeof (entry_a) - 1));
+		self->page_pool->getFillPages (&page_list, flashvars->mem());
+
+		static char const entry_b [] = "\"/>\n"
+			"    <embed src=\"/basic/BasicPlayer.swf\"\n"
+			"        FlashVars=\"";
+		self->page_pool->getFillPages (&page_list, ConstMemory (entry_b, sizeof (entry_b) - 1));
+		self->page_pool->getFillPages (&page_list, flashvars->mem());
+
+		static char const entry_c [] = "\"\n"
+			"        name=\"BasicPlayer\"\n"
+			"        align=\"Default\"\n"
+			"        width=\"100%\"\n"
+			"        height=\"100%\"\n"
+			"        bgcolor=\"#000000\"\n"
+			"        scale=\"noscale\"\n"
+			"        quality=\"high\"\n"
+			"        allowfullscreen=\"true\"\n"
+			"        allowscriptaccess=\"always\"\n"
+			"        type=\"application/x-shockwave-flash\"\n"
+			"        pluginspage=\"http://www.adobe.com/shockwave/download/index.cgi?P1_Prod_Version=ShockwaveFlash\"/>\n"
+			"  </object>\n"
+			"</div>\n";
+		self->page_pool->getFillPages (&page_list, ConstMemory (entry_c, sizeof (entry_c) - 1));
+
+		static char const entry_a0 [] =
+		        "<div style=\"width: 300px; padding-bottom: 15px; padding-left: 20px; color: white;\">";
+		self->page_pool->getFillPages (&page_list, ConstMemory (entry_a0, sizeof (entry_a0) - 1));
+		self->page_pool->getFillPages (&page_list, channel_entry->channel_name->mem());
+		static char const entry_a1 [] =
+			"&nbsp;&nbsp; ";
+		self->page_pool->getFillPages (&page_list, ConstMemory (entry_a1, sizeof (entry_a1) - 1));
+		self->page_pool->getFillPages (&page_list, channel_entry->channel_desc->mem());
+		static char const entry_a2 [] =
+			"</div>\n"
+			"</td>\n";
+		self->page_pool->getFillPages (&page_list, ConstMemory (entry_a2, sizeof (entry_a2) - 1));
+
+		++row_cnt;
+		if (row_cnt == row_size) {
+		    row_cnt = 0;
+
+		    static char const row_suffix [] = "</tr>\n";
+		    self->page_pool->getFillPages (&page_list, ConstMemory (row_suffix, sizeof (row_suffix) - 1));
+		}
+	    }
+
+	    if (row_cnt != 0) {
+		static char const row_suffix [] = "</tr>\n";
+		self->page_pool->getFillPages (&page_list, ConstMemory (row_suffix, sizeof (row_suffix) - 1));
+	    }
+	}
+
+	self->mutex.unlock ();
+
+	self->page_pool->getFillPages (&page_list, ConstMemory (suffix, sizeof (suffix) - 1));
+
+	Size content_len = 0;
+	{
+	    PagePool::Page *page = page_list.first;
+	    while (page) {
+		content_len += page->data_len;
+		page = page->getNextMsgPage();
+	    }
+	}
+
+	conn_sender->send (self->page_pool,
+			   false /* do_flush */,
+			   MOMENT_GST__OK_HEADERS ("text/html", content_len),
+			   "\r\n");
+	conn_sender->sendPages (self->page_pool, &page_list, true /* do_flush */);
+
+	logA_ ("mod_gst 200 ", req->getClientAddress(), " ", req->getRequestLine());
+    } else {
+	logE_ (_func, "Unknown admin request: ", req->getFullPath());
+
+	ConstMemory const reply_body = "404 Not Found (mod_gst)";
+	conn_sender->send (self->page_pool,
+			   true /* do_flush */,
+			   MOMENT_GST__404_HEADERS (reply_body.len()),
+			   "\r\n",
+			   reply_body);
+
+	logA_ ("gst_admin 404 ", req->getClientAddress(), " ", req->getRequestLine());
+    }
+
+_return:
+    return Result::Success;
+
+_bad_request:
+    {
+	MOMENT_GST__HEADERS_DATE
+	ConstMemory const reply_body = "400 Bad Request (mod_gst)";
 	conn_sender->send (
 		self->page_pool,
 		true /* do_flush */,
@@ -493,6 +1049,7 @@ MomentGstModule::parseSourcesConfigSection ()
 	    logD_ (_func, "Stream name: ", stream_name, "; stream uri: ", stream_uri);
 
 	    createStreamChannel (stream_name,
+			         ConstMemory() /* channel_desc */,
 				 stream_uri,
 				 false /* is_chain */,
 				 false /* recording */,
@@ -571,6 +1128,7 @@ MomentGstModule::parseChainsConfigSection ()
 	    ConstMemory const chain_spec = chain_option->getValue()->mem();
 
 	    createStreamChannel (stream_name,
+			         ConstMemory() /* channel_desc */,
 				 chain_spec,
 				 true /* is_chain */,
 				 false /* recording */,
@@ -633,6 +1191,7 @@ MomentGstModule::parseChainsConfigSection ()
 	    }
 
 	    createStreamChannel (stream_name,
+			         ConstMemory() /* channel_desc */,
 				 chain_spec,
 				 true /* is_chain */,
 				 got_record_path /* recording */,
@@ -667,6 +1226,23 @@ MomentGstModule::parseStreamsConfigSection ()
 		    stream_name = opt->getValue()->getAsString();
 		    logD_ (_func, "stream_name: ", stream_name);
 		}
+
+		if (stream_name.isNull()) {
+		    logW_ (_func, "Unnamed stream in section mod_gst/streams");
+		    stream_name = grab (new String);
+		}
+	    }
+
+	    Ref<String> channel_desc;
+	    {
+		MConfig::Option * const opt = item_section->getOption ("desc");
+		if (opt && opt->getValue()) {
+		    channel_desc = opt->getValue()->getAsString();
+		    logD_ (_func, "channel_desc: ", channel_desc);
+		}
+
+		if (channel_desc.isNull())
+		    channel_desc = grab (new String);
 	    }
 
 	    Ref<String> chain;
@@ -708,11 +1284,6 @@ MomentGstModule::parseStreamsConfigSection ()
 		}
 	    }
 
-	    if (stream_name.isNull()) {
-		logW_ (_func, "Unnamed stream in section mod_gst/streams");
-		stream_name = grab (new String);
-	    }
-
 	    Ref<String> record_path;
 	    {
 		MConfig::Option * const opt = item_section->getOption ("record_path");
@@ -724,6 +1295,7 @@ MomentGstModule::parseStreamsConfigSection ()
 
 	    if (chain && !chain->isNull()) {
 		createStreamChannel (stream_name->mem(),
+				     channel_desc->mem(),
 				     chain->mem(),
 				     true /* is_chain */,
 				     record_path ? true : false /* recording */,
@@ -731,6 +1303,7 @@ MomentGstModule::parseStreamsConfigSection ()
 	    } else
 	    if (uri && !uri->isNull()) {
 		createStreamChannel (stream_name->mem(),
+				     channel_desc->mem(),
 				     uri->mem(),
 				     false /* is_chain */,
 				     record_path ? true : false /* recording */,
@@ -739,11 +1312,13 @@ MomentGstModule::parseStreamsConfigSection ()
 	    if (playlist && !playlist->isNull()) {
 		logD_ (_func, "playlist: ", playlist);
 		createPlaylistChannel (stream_name->mem(),
+				       channel_desc->mem(),
 				       playlist->mem(),
 				       record_path ? true : false /* recording */,
 				       record_path ? record_path->mem() : ConstMemory());
 	    } else {
 		logW_ (_func, "None of chain/uri/playlist specified for stream \"", stream_name, "\"");
+		createDummyChannel (stream_name->mem(), channel_desc->mem());
 	    }
 	}
     }
@@ -904,13 +1479,34 @@ MomentGstModule::init (MomentServer * const moment)
 	no_video_timeout = (Time) tmp_uint64;
     }
 
+    {
+	ConstMemory const opt_name = "moment/this_rtmpt_server_addr";
+	ConstMemory const opt_val = config->getString (opt_name);
+	logI_ (_func, opt_name, ": ", opt_val);
+	if (!opt_val.isNull()) {
+	    this_rtmpt_server_addr = grab (new String (opt_val));
+	} else {
+	    this_rtmpt_server_addr = grab (new String ("127.0.0.1:8081"));
+	    logI_ (_func, opt_name, " config parameter is not set. "
+		   "Defaulting to ", this_rtmpt_server_addr);
+	}
+    }
+
     moment->getAdminHttpService()->addHttpHandler (
 	    CbDesc<HttpService::HttpHandler> (
 		    &admin_http_handler, this /* cb_data */, NULL /* coderef_container */),
 	    "moment_admin",
 	    true    /* preassembly */,
-	    1 << 20 /* 1 Mb */,
+	    1 << 20 /* 1 Mb */ /* preassembly_limit */,
 	    true    /* parse_body_params */);
+
+    moment->getHttpService()->addHttpHandler (
+	    CbDesc<HttpService::HttpHandler> (
+		    &http_handler, this /* cb_data */, NULL /* coderef_container */),
+	    "moment_gst",
+	    true /* preassembly */,
+	    1 << 20 /* 1 Mb */ /* preassembly_limit */,
+	    true /* parse_body_params */);
 
     parseSourcesConfigSection ();
     parseChainsConfigSection ();

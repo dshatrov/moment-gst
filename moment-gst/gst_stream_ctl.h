@@ -122,6 +122,14 @@ private:
     mt_mutex (mutex) void *stream_ticket;
     mt_mutex (mutex) VirtRef stream_ticket_ref;
 
+    mt_mutex (mutex) bool got_video;
+
+    mt_mutex (mutex) Time stream_start_time;
+
+    mt_mutex (mutex) Uint64 rx_bytes_accum;
+    mt_mutex (mutex) Uint64 rx_audio_bytes_accum;
+    mt_mutex (mutex) Uint64 rx_video_bytes_accum;
+
     // Separate state mutex to decouple from synchronization of deletion
     // subscriptions.
     StateMutex mutex;
@@ -136,7 +144,7 @@ private:
 
     mt_mutex (mutex) void closeStream (bool replace_video_stream);
 
-    mt_unlocks (mutex) void restartStream ();
+    mt_unlocks (mutex) void doRestartStream ();
 
     static bool deferredTask (void *_self);
 
@@ -151,6 +159,8 @@ private:
 
       static void noVideo (void *_stream_data);
 
+      static void gotVideo (void *_stream_data);
+
       static void streamStatusEvent (void *_stream_data);
 
     mt_end
@@ -163,6 +173,23 @@ public:
 			   Time            seek = 0);
 
     void endVideoStream ();
+
+    void restartStream ();
+
+    bool isSourceOnline ();
+
+    class TrafficStats
+    {
+    public:
+	Uint64 rx_bytes;
+	Uint64 rx_audio_bytes;
+	Uint64 rx_video_bytes;
+	Time time_elapsed;
+    };
+
+    void getTrafficStats (TrafficStats *ret_traffic_stats);
+
+    void resetTrafficStats ();
 
     mt_const void init (MomentServer      *moment,
 			DeferredProcessor *deferred_processor,

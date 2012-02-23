@@ -36,11 +36,16 @@ GstStreamCtl::createStream (Time const initial_seek)
     }
  */
 
+    got_video = false;
+
     if (!video_stream) {
 	video_stream = grab (new VideoStream);
 	logD_ (_func, "Calling moment->addVideoStream, stream_name: ", stream_name->mem());
 	video_stream_key = moment->addVideoStream (video_stream, stream_name->mem());
     }
+
+    if (stream_start_time == 0)
+	stream_start_time = getTime();
 
     gst_stream = grab (new GstStream);
     gst_stream->init (stream_name->mem(),
@@ -95,7 +100,18 @@ GstStreamCtl::closeStream (bool const replace_video_stream)
 {
     logD_ (_func_);
 
+    got_video = false;
+
     if (gst_stream) {
+	{
+	    GstStream::TrafficStats traffic_stats;
+	    gst_stream->getTrafficStats (&traffic_stats);
+
+	    rx_bytes_accum += traffic_stats.rx_bytes;
+	    rx_audio_bytes_accum += traffic_stats.rx_audio_bytes;
+	    rx_video_bytes_accum += traffic_stats.rx_video_bytes;
+	}
+
 	gst_stream->releasePipeline ();
 	gst_stream = NULL;
     }
@@ -120,7 +136,7 @@ GstStreamCtl::closeStream (bool const replace_video_stream)
 }
 
 mt_unlocks (mutex) void
-GstStreamCtl::restartStream ()
+GstStreamCtl::doRestartStream ()
 {
     logD_ (_func_);
 
@@ -166,6 +182,7 @@ GstStream::Frontend GstStreamCtl::gst_stream_frontend = {
     streamError,
     streamEos,
     noVideo,
+    gotVideo,
     streamStatusEvent
 };
 
@@ -230,7 +247,20 @@ GstStreamCtl::noVideo (void * const _stream_data)
 	return;
     }
 
-    mt_unlocks (mutex) self->restartStream ();
+    mt_unlocks (mutex) self->doRestartStream ();
+}
+
+void
+GstStreamCtl::gotVideo (void * const _stream_data)
+{
+    logD_ (_func_);
+
+    StreamData * const stream_data = static_cast <StreamData*> (_stream_data);
+    GstStreamCtl * const self = stream_data->gst_stream_ctl;
+
+    self->mutex.lock ();
+    self->got_video = true;
+    self->mutex.unlock ();
 }
 
 void
@@ -275,6 +305,60 @@ GstStreamCtl::endVideoStream ()
 	closeStream (true /* replace_video_stream */);
     }
     mutex.unlock ();
+}
+
+void
+GstStreamCtl::restartStream ()
+{
+    mutex.lock ();
+    mt_unlocks (mutex) doRestartStream ();
+}
+
+bool
+GstStreamCtl::isSourceOnline ()
+{
+    mutex.lock ();
+    bool const res = got_video;
+    mutex.unlock ();
+    return res;
+}
+
+void
+GstStreamCtl::getTrafficStats (TrafficStats * const ret_traffic_stats)
+{
+  StateMutexLock l (mutex);
+
+    GstStream::TrafficStats stream_tstat;
+    if (gst_stream)
+	gst_stream->getTrafficStats (&stream_tstat);
+    else
+	stream_tstat.reset ();
+
+    ret_traffic_stats->rx_bytes = rx_bytes_accum + stream_tstat.rx_bytes;
+    ret_traffic_stats->rx_audio_bytes = rx_audio_bytes_accum + stream_tstat.rx_audio_bytes;
+    ret_traffic_stats->rx_video_bytes = rx_video_bytes_accum + stream_tstat.rx_video_bytes;
+    {
+	Time const cur_time = getTime();
+	if (cur_time > stream_start_time)
+	    ret_traffic_stats->time_elapsed = cur_time - stream_start_time;
+	else
+	    ret_traffic_stats->time_elapsed = 0;
+    }
+}
+
+void
+GstStreamCtl::resetTrafficStats ()
+{
+  StateMutexLock l (mutex);
+
+    if (gst_stream)
+	gst_stream->resetTrafficStats ();
+
+    rx_bytes_accum = 0;
+    rx_audio_bytes_accum = 0;
+    rx_video_bytes_accum = 0;
+
+    stream_start_time = getTime();
 }
 
 mt_const void
@@ -329,7 +413,15 @@ GstStreamCtl::GstStreamCtl ()
 
       is_chain (false),
 
-      stream_ticket (NULL)
+      stream_ticket (NULL),
+
+      got_video (false),
+
+      stream_start_time (0),
+
+      rx_bytes_accum (0),
+      rx_audio_bytes_accum (0),
+      rx_video_bytes_accum (0)
 {
     logD_ (_func, "0x", fmt_hex, (UintPtr) this);
 

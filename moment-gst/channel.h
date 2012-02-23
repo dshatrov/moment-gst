@@ -103,6 +103,16 @@ private:
 
 
 public:
+    void restartStream ()
+    {
+	stream_ctl->restartStream ();
+    }
+
+    bool isSourceOnline ()
+    {
+	return stream_ctl->isSourceOnline();
+    }
+
     Result setPosition_Id (ConstMemory const id,
 			   Time        const seek)
     {
@@ -133,6 +143,16 @@ public:
 			    Ref<String> * const ret_err_msg)
     {
 	return playback.loadPlaylistMem (mem, keep_cur_item, ret_err_msg);
+    }
+
+    void getTrafficStats (GstStreamCtl::TrafficStats * const ret_traffic_stats)
+    {
+	stream_ctl->getTrafficStats (ret_traffic_stats);
+    }
+
+    void resetTrafficStats ()
+    {
+	stream_ctl->resetTrafficStats ();
     }
 
     Informer_<ChannelEvents>* getEventInformer ()
