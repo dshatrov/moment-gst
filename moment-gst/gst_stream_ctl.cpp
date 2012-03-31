@@ -433,6 +433,13 @@ GstStreamCtl::~GstStreamCtl ()
 {
     logD_ (_func, "0x", fmt_hex, (UintPtr) this);
 
+    mutex.lock ();
+    if (gst_stream) {
+        gst_stream->releasePipeline ();
+        gst_stream = NULL;
+    }
+    mutex.unlock ();
+
     deferred_reg.release ();
 }
 

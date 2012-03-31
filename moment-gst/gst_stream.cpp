@@ -33,6 +33,49 @@ static LogGroup libMary_logGroup_frames ("moment-gst_frames", LogLevel::E); // E
 static LogGroup libMary_logGroup_novideo ("moment-gst_novideo", LogLevel::I);
 
 void
+GstStream::workqueueThreadFunc (void * const _self)
+{
+    GstStream * const self = static_cast <GstStream*> (_self);
+
+    updateTime ();
+
+    for (;;) {
+        self->mutex.lock ();
+
+        if (self->stream_closed) {
+            self->mutex.unlock ();
+            return;
+        }
+
+        while (self->workqueue_list.isEmpty()) {
+            self->workqueue_cond.wait (self->mutex);
+            updateTime ();
+
+            if (self->stream_closed) {
+                self->mutex.unlock ();
+                return;
+            }
+        }
+
+        Ref<WorkqueueItem> const workqueue_item = self->workqueue_list.getFirst();
+        self->workqueue_list.remove (self->workqueue_list.getFirstElement());
+
+        self->mutex.unlock ();
+
+        switch (workqueue_item->item_type) {
+            case WorkqueueItem::ItemType_CreatePipeline:
+                self->doCreatePipeline ();
+                break;
+            case WorkqueueItem::ItemType_ReleasePipeline:
+                self->doReleasePipeline ();
+                break;
+            default:
+                unreachable ();
+        }
+    }
+}
+
+void
 GstStream::createPipelineForChainSpec ()
 {
     logD (chains, _func, stream_spec);
@@ -560,7 +603,7 @@ GstStream::pipelineCreationFailed ()
 }
 
 void
-GstStream::releasePipeline ()
+GstStream::doReleasePipeline ()
 {
     logD (pipeline, _func_);
 
@@ -602,6 +645,34 @@ GstStream::releasePipeline ()
 
     if (tmp_mix_video_src)
 	gst_object_unref (tmp_mix_video_src);
+}
+
+void
+GstStream::releasePipeline ()
+{
+    mutex.lock ();
+
+    while (!workqueue_list.isEmpty()) {
+        Ref<WorkqueueItem> &last_item = workqueue_list.getLast();
+        switch (last_item->item_type) {
+            case WorkqueueItem::ItemType_CreatePipeline:
+                workqueue_list.remove (workqueue_list.getLastElement());
+                break;
+            case WorkqueueItem::ItemType_ReleasePipeline:
+                mutex.unlock ();
+                return;
+            default:
+                unreachable ();
+        }
+    }
+
+    Ref<WorkqueueItem> const new_item = grab (new WorkqueueItem);
+    new_item->item_type = WorkqueueItem::ItemType_ReleasePipeline;
+
+    workqueue_list.prepend (new_item);
+    workqueue_cond.signal ();
+
+    mutex.unlock ();
 }
 
 mt_mutex (mutex) void
@@ -1749,12 +1820,40 @@ GstStream::mixStreamVideoMessage (VideoStream::VideoMessage * const mt_nonnull v
 }
 
 void
-GstStream::createPipeline ()
+GstStream::doCreatePipeline ()
 {
     if (is_chain)
 	createPipelineForChainSpec ();
     else
 	createPipelineForUri ();
+}
+
+void
+GstStream::createPipeline ()
+{
+    mutex.lock ();
+
+    while (!workqueue_list.isEmpty()) {
+        Ref<WorkqueueItem> &last_item = workqueue_list.getLast();
+        switch (last_item->item_type) {
+            case WorkqueueItem::ItemType_CreatePipeline:
+                mutex.unlock ();
+                return;
+            case WorkqueueItem::ItemType_ReleasePipeline:
+                mutex.unlock ();
+                return;
+            default:
+                unreachable ();
+        }
+    }
+
+    Ref<WorkqueueItem> const new_item = grab (new WorkqueueItem);
+    new_item->item_type = WorkqueueItem::ItemType_CreatePipeline;
+
+    workqueue_list.prepend (new_item);
+    workqueue_cond.signal ();
+
+    mutex.unlock ();
 }
 
 void
@@ -1955,6 +2054,15 @@ GstStream::init (ConstMemory   const stream_name,
 
     this->initial_seek = initial_seek;
 
+    {
+        Ref<Thread> const workqueue_thread =
+                grab (new Thread (CbDesc<Thread::ThreadFunc> (workqueueThreadFunc,
+                                                              this,
+                                                              this)));
+        if (!workqueue_thread->spawn (false /* joinable */))
+            logE_ (_func, "Failed to spawn workqueue thread: ", exc->toString());
+    }
+
     if (mix_video_stream) {
 	mix_audio_caps = gst_caps_new_simple ("audio/x-speex",
 #if 0
@@ -2058,7 +2166,11 @@ GstStream::~GstStream ()
 {
     logD (pipeline, _func, "~GstStream()");
 
-    releasePipeline ();
+    mutex.lock ();
+    if (!stream_closed) {
+        unreachable ();
+    }
+    mutex.unlock ();
 
     if (mix_audio_caps)
 	gst_caps_unref (mix_audio_caps);

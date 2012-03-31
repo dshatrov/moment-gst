@@ -51,6 +51,17 @@ public:
     };
 
 private:
+    class WorkqueueItem : public Referenced
+    {
+    public:
+        enum ItemType {
+            ItemType_CreatePipeline,
+            ItemType_ReleasePipeline
+        };
+
+        mt_const ItemType item_type;
+    };
+
     // For log lines.
     mt_const Ref<String> stream_name;
 
@@ -75,6 +86,9 @@ private:
 
     mt_mutex (mutex)
     mt_begin
+
+      List< Ref<WorkqueueItem> > workqueue_list;
+      Cond workqueue_cond;
 
       Timers::TimerKey no_video_timer;
 
@@ -154,10 +168,15 @@ private:
 
     mt_const Cb<Frontend> frontend;
 
+    static void workqueueThreadFunc (void *_self);
+
   // Pipeline manipulation
 
     void createPipelineForChainSpec ();
     void createPipelineForUri ();
+
+    void doCreatePipeline ();
+    void doReleasePipeline ();
 
     mt_unlocks (mutex) Result setPipelinePlaying ();
 
