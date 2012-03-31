@@ -753,7 +753,9 @@ GstStream::doAudioData (GstBuffer * const buffer)
 	if (GST_BUFFER_FLAG_IS_SET (buffer, GST_BUFFER_FLAG_IN_CAPS) ||
 	    GST_BUFFER_TIMESTAMP (buffer) == (GstClockTime) -1)
 	{
+            logLock ();
 	    hexdump (logs, ConstMemory (GST_BUFFER_DATA (buffer), GST_BUFFER_SIZE (buffer)));
+            logUnlock ();
 	}
     }
 
@@ -1013,8 +1015,11 @@ GstStream::doAudioData (GstBuffer * const buffer)
 	    msg_len += msg_audio_hdr_len;
 
 	    logD (frames, _func, "CODEC DATA");
-	    if (logLevelOn (frames, LogLevel::D))
+	    if (logLevelOn (frames, LogLevel::D)) {
+                logLock ();
 		hexdump (logs, ConstMemory (GST_BUFFER_DATA (codec_data_buffers [i]), GST_BUFFER_SIZE (codec_data_buffers [i])));
+                logUnlock ();
+            }
 
 	    RtmpConnection::fillPrechunkedPages (&prechunk_ctx,
 						 ConstMemory (GST_BUFFER_DATA (codec_data_buffers [i]),
@@ -1306,8 +1311,11 @@ GstStream::doVideoData (GstBuffer * const buffer)
 	msg_len += sizeof (avc_video_hdr);
 
 	logD (frames,_func, "AVC SEQUENCE HEADER");
-	if (logLevelOn (frames, LogLevel::D))
+	if (logLevelOn (frames, LogLevel::D)) {
+            logLock ();
 	    hexdump (logs, ConstMemory (GST_BUFFER_DATA (avc_codec_data_buffer), GST_BUFFER_SIZE (avc_codec_data_buffer)));
+            logUnlock ();
+        }
 
 #if 0
 	// TEST
