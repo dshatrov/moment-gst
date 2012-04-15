@@ -262,7 +262,7 @@ Recorder::init (MomentServer * const moment,
     this->channel_set = channel_set;
     this->filename_prefix = grab (new String (filename_prefix));
 
-    playback.init (moment->getServerApp()->getTimers());
+    playback.init (moment->getServerApp()->getServerContext()->getTimers());
     playback.setFrontend (CbDesc<Playback::Frontend> (
 	    &playback_frontend,
 	    this /* cb_data */,

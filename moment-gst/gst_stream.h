@@ -77,6 +77,7 @@ private:
     mt_const bool is_chain;
 
     mt_const bool send_metadata;
+    mt_const bool enable_prechunking;
 
     mt_const Uint64 default_width;
     mt_const Uint64 default_height;
@@ -285,6 +286,7 @@ public:
 			VideoStream    *mix_video_stream,
 			Time            initial_seek,
 			bool            send_metadata,
+                        bool            enable_prechunking,
 			Uint64          default_width,
 			Uint64          default_height,
 			Uint64          default_bitrate,

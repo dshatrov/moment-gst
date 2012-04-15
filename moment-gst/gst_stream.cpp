@@ -685,9 +685,8 @@ GstStream::reportMetaData ()
     }
     metadata_reported = true;
 
-    if (!send_metadata) {
+    if (!send_metadata)
 	return;
-    }
 
     VideoStream::VideoMessage msg;
     if (!RtmpServer::encodeMetaData (&metadata, page_pool, &msg)) {
@@ -1076,13 +1075,17 @@ GstStream::doAudioData (GstBuffer * const buffer)
 	    if (codec_data_type == VideoStream::AudioFrameType::AacSequenceHeader)
 		msg_audio_hdr_len = 2;
 
-	    RtmpConnection::fillPrechunkedPages (&prechunk_ctx,
-						 ConstMemory (msg_audio_hdr, msg_audio_hdr_len),
-						 page_pool,
-						 &page_list,
-						 RtmpConnection::DefaultAudioChunkStreamId,
-						 cd_timestamp,
-						 true /* first_chunk */);
+            if (enable_prechunking) {
+                RtmpConnection::fillPrechunkedPages (&prechunk_ctx,
+                                                     ConstMemory (msg_audio_hdr, msg_audio_hdr_len),
+                                                     page_pool,
+                                                     &page_list,
+                                                     RtmpConnection::DefaultAudioChunkStreamId,
+                                                     cd_timestamp,
+                                                     true /* first_chunk */);
+            } else {
+                page_pool->getFillPages (&page_list, ConstMemory (msg_audio_hdr, msg_audio_hdr_len));
+            }
 	    msg_len += msg_audio_hdr_len;
 
 	    logD (frames, _func, "CODEC DATA");
@@ -1092,19 +1095,25 @@ GstStream::doAudioData (GstBuffer * const buffer)
                 logUnlock ();
             }
 
-	    RtmpConnection::fillPrechunkedPages (&prechunk_ctx,
-						 ConstMemory (GST_BUFFER_DATA (codec_data_buffers [i]),
-							      GST_BUFFER_SIZE (codec_data_buffers [i])),
-						 page_pool,
-						 &page_list,
-						 RtmpConnection::DefaultAudioChunkStreamId,
-						 cd_timestamp,
-						 false /* first_chunk */);
+            if (enable_prechunking) {
+                RtmpConnection::fillPrechunkedPages (&prechunk_ctx,
+                                                     ConstMemory (GST_BUFFER_DATA (codec_data_buffers [i]),
+                                                                  GST_BUFFER_SIZE (codec_data_buffers [i])),
+                                                     page_pool,
+                                                     &page_list,
+                                                     RtmpConnection::DefaultAudioChunkStreamId,
+                                                     cd_timestamp,
+                                                     false /* first_chunk */);
+            } else {
+                page_pool->getFillPages (&page_list,
+                                         ConstMemory (GST_BUFFER_DATA (codec_data_buffers [i]),
+                                                      GST_BUFFER_SIZE (codec_data_buffers [i])));
+            }
 	    msg_len += GST_BUFFER_SIZE (codec_data_buffers [i]);
 
 	    VideoStream::AudioMessage msg;
 	    msg.timestamp = cd_timestamp;
-	    msg.prechunk_size = RtmpConnection::PrechunkSize;
+	    msg.prechunk_size = (enable_prechunking ? RtmpConnection::PrechunkSize : 0);
 	    msg.frame_type = codec_data_type;
 	    msg.codec_id = tmp_audio_codec_id;
 
@@ -1139,33 +1148,37 @@ GstStream::doAudioData (GstBuffer * const buffer)
     PagePool::PageListHead page_list;
     RtmpConnection::PrechunkContext prechunk_ctx;
 
-    // Non-prechunked variant
-    // page_pool->getFillPages (&page_list, ConstMemory (gen_audio_hdr, gen_audio_hdr_len));
-    RtmpConnection::fillPrechunkedPages (&prechunk_ctx,
-					 ConstMemory (gen_audio_hdr, gen_audio_hdr_len),
-					 page_pool,
-					 &page_list,
-					 RtmpConnection::DefaultAudioChunkStreamId,
-					 timestamp,
-					 true /* first_chunk */);
+    if (enable_prechunking) {
+        RtmpConnection::fillPrechunkedPages (&prechunk_ctx,
+                                             ConstMemory (gen_audio_hdr, gen_audio_hdr_len),
+                                             page_pool,
+                                             &page_list,
+                                             RtmpConnection::DefaultAudioChunkStreamId,
+                                             timestamp,
+                                             true /* first_chunk */);
+    } else {
+        page_pool->getFillPages (&page_list, ConstMemory (gen_audio_hdr, gen_audio_hdr_len));
+    }
     msg_len += gen_audio_hdr_len;
 
-    // Non-prechunked variant
-    // page_pool->getFillPages (&page_list, ConstMemory (GST_BUFFER_DATA (buffer), GST_BUFFER_SIZE (buffer)));
-    RtmpConnection::fillPrechunkedPages (&prechunk_ctx,
-					 ConstMemory (GST_BUFFER_DATA (buffer), GST_BUFFER_SIZE (buffer)),
-					 page_pool,
-					 &page_list,
-					 RtmpConnection::DefaultAudioChunkStreamId,
-					 timestamp,
-					 false /* first_chunk */);
+    if (enable_prechunking) {
+        RtmpConnection::fillPrechunkedPages (&prechunk_ctx,
+                                             ConstMemory (GST_BUFFER_DATA (buffer), GST_BUFFER_SIZE (buffer)),
+                                             page_pool,
+                                             &page_list,
+                                             RtmpConnection::DefaultAudioChunkStreamId,
+                                             timestamp,
+                                             false /* first_chunk */);
+    } else {
+        page_pool->getFillPages (&page_list, ConstMemory (GST_BUFFER_DATA (buffer), GST_BUFFER_SIZE (buffer)));
+    }
     msg_len += GST_BUFFER_SIZE (buffer);
 
 //    hexdump (errs, ConstMemory (GST_BUFFER_DATA (buffer), GST_BUFFER_SIZE (buffer)));
 
     VideoStream::AudioMessage msg;
     msg.timestamp = timestamp;
-    msg.prechunk_size = RtmpConnection::PrechunkSize;
+    msg.prechunk_size = (enable_prechunking ? RtmpConnection::PrechunkSize : 0);
     msg.frame_type = VideoStream::AudioFrameType::RawData;
     msg.codec_id = tmp_audio_codec_id;
 
@@ -1372,14 +1385,20 @@ GstStream::doVideoData (GstBuffer * const buffer)
 						       // AVC sequence header;
 						       // Composition time offset = 0.
 
-	RtmpConnection::fillPrechunkedPages (&prechunk_ctx,
-					     ConstMemory::forObject (avc_video_hdr),
-					     page_pool,
-					     &page_list,
-					     RtmpConnection::DefaultVideoChunkStreamId,
-					     timestamp,
-					     true /* first_chunk */);
-	msg_len += sizeof (avc_video_hdr);
+        if (enable_prechunking) {
+            RtmpConnection::fillPrechunkedPages (&prechunk_ctx,
+                                                 ConstMemory::forObject (avc_video_hdr),
+                                                 page_pool,
+                                                 &page_list,
+                                                 RtmpConnection::DefaultVideoChunkStreamId,
+                                                 timestamp,
+                                                 true /* first_chunk */);
+            msg_len += sizeof (avc_video_hdr);
+        } else {
+// TODO FIXME This should be done in mod_rtmp
+// TEST (uncomment)            page_pool->getFillPages (&page_list, ConstMemory::forObject (avc_video_hdr));
+//            msg_len += sizeof (avc_video_hdr);
+        }
 
 	logD (frames,_func, "AVC SEQUENCE HEADER");
 	if (logLevelOn (frames, LogLevel::D)) {
@@ -1398,19 +1417,25 @@ GstStream::doVideoData (GstBuffer * const buffer)
 	}
 #endif
 
-	RtmpConnection::fillPrechunkedPages (&prechunk_ctx,
-					     ConstMemory (GST_BUFFER_DATA (avc_codec_data_buffer),
-							  GST_BUFFER_SIZE (avc_codec_data_buffer)),
-					     page_pool,
-					     &page_list,
-					     RtmpConnection::DefaultVideoChunkStreamId,
-					     timestamp,
-					     false /* first_chunk */);
+        if (enable_prechunking) {
+            RtmpConnection::fillPrechunkedPages (&prechunk_ctx,
+                                                 ConstMemory (GST_BUFFER_DATA (avc_codec_data_buffer),
+                                                              GST_BUFFER_SIZE (avc_codec_data_buffer)),
+                                                 page_pool,
+                                                 &page_list,
+                                                 RtmpConnection::DefaultVideoChunkStreamId,
+                                                 timestamp,
+                                                 false /* first_chunk */);
+        } else {
+            page_pool->getFillPages (&page_list,
+                                     ConstMemory (GST_BUFFER_DATA (avc_codec_data_buffer),
+                                                  GST_BUFFER_SIZE (avc_codec_data_buffer)));
+        }
 	msg_len += GST_BUFFER_SIZE (avc_codec_data_buffer);
 
 	VideoStream::VideoMessage msg;
 	msg.timestamp = timestamp;
-	msg.prechunk_size = RtmpConnection::PrechunkSize;
+	msg.prechunk_size = (enable_prechunking ? RtmpConnection::PrechunkSize : 0);
 	msg.frame_type = VideoStream::VideoFrameType::AvcSequenceHeader;
 	msg.codec_id = tmp_video_codec_id;
 
@@ -1494,32 +1519,39 @@ GstStream::doVideoData (GstBuffer * const buffer)
 
     PagePool::PageListHead page_list;
     RtmpConnection::PrechunkContext prechunk_ctx;
-    // Non-prechunked variant
-    // page_pool->getFillPages (&page_list, ConstMemory::forObject (video_hdr));
-    RtmpConnection::fillPrechunkedPages (&prechunk_ctx,
-					 ConstMemory (gen_video_hdr, gen_video_hdr_len),
-					 page_pool,
-					 &page_list,
-					 RtmpConnection::DefaultVideoChunkStreamId,
-					 timestamp,
-					 true /* first_chunk */);
-    msg_len += gen_video_hdr_len;
 
-    // Non-prechunked variant
-    // page_pool->getFillPages (&page_list, ConstMemory (GST_BUFFER_DATA (buffer), GST_BUFFER_SIZE (buffer)));
-    RtmpConnection::fillPrechunkedPages (&prechunk_ctx,
-					 ConstMemory (GST_BUFFER_DATA (buffer), GST_BUFFER_SIZE (buffer)),
-					 page_pool,
-					 &page_list,
-					 RtmpConnection::DefaultVideoChunkStreamId,
-					 timestamp,
-					 false /* first_chunk */);
+    if (enable_prechunking) {
+        RtmpConnection::fillPrechunkedPages (&prechunk_ctx,
+                                             ConstMemory (gen_video_hdr, gen_video_hdr_len),
+                                             page_pool,
+                                             &page_list,
+                                             RtmpConnection::DefaultVideoChunkStreamId,
+                                             timestamp,
+                                             true /* first_chunk */);
+        msg_len += gen_video_hdr_len;
+    } else {
+// TEST (uncomment)
+//        page_pool->getFillPages (&page_list, ConstMemory (gen_video_hdr, gen_video_hdr_len));
+//        msg_len += gen_video_hdr_len;
+    }
+
+    if (enable_prechunking) {
+        RtmpConnection::fillPrechunkedPages (&prechunk_ctx,
+                                             ConstMemory (GST_BUFFER_DATA (buffer), GST_BUFFER_SIZE (buffer)),
+                                             page_pool,
+                                             &page_list,
+                                             RtmpConnection::DefaultVideoChunkStreamId,
+                                             timestamp,
+                                             false /* first_chunk */);
+    } else {
+        page_pool->getFillPages (&page_list, ConstMemory (GST_BUFFER_DATA (buffer), GST_BUFFER_SIZE (buffer)));
+    }
     msg_len += GST_BUFFER_SIZE (buffer);
 
 //    hexdump (errs, ConstMemory (GST_BUFFER_DATA (buffer), GST_BUFFER_SIZE (buffer)));
 
     msg.timestamp = timestamp;
-    msg.prechunk_size = RtmpConnection::PrechunkSize;
+    msg.prechunk_size = (enable_prechunking ? RtmpConnection::PrechunkSize : 0);
 
     msg.page_pool = page_pool;
     msg.page_list = page_list;
@@ -2029,6 +2061,7 @@ GstStream::init (ConstMemory   const stream_name,
 		 VideoStream * const mix_video_stream,
 		 Time          const initial_seek,
 		 bool          const send_metadata,
+                 bool          const enable_prechunking,
 		 Uint64        const default_width,
 		 Uint64        const default_height,
 		 Uint64        const default_bitrate,
@@ -2045,6 +2078,7 @@ GstStream::init (ConstMemory   const stream_name,
     this->mix_video_stream = mix_video_stream;
 
     this->send_metadata = send_metadata;
+    this->enable_prechunking = enable_prechunking;
 
     this->default_width = default_width;
     this->default_height = default_height;
@@ -2100,6 +2134,7 @@ GstStream::GstStream ()
       is_chain (false),
 
       send_metadata (false),
+      enable_prechunking (false),
 
       default_width (0),
       default_height (0),

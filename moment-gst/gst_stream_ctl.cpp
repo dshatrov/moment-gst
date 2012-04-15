@@ -57,6 +57,7 @@ GstStreamCtl::createStream (Time const initial_seek)
 		      moment->getMixVideoStream(),
 		      initial_seek,
 		      send_metadata,
+                      enable_prechunking,
 		      default_width,
 		      default_height,
 		      default_bitrate,
@@ -120,9 +121,9 @@ GstStreamCtl::closeStream (bool const replace_video_stream)
     if (video_stream
 	&& !(keep_video_stream && replace_video_stream))
     {
-	video_stream->close ();
 	// TODO moment->replaceVideoStream() to swap video streams atomically
 	moment->removeVideoStream (video_stream_key);
+	video_stream->close ();
 	video_stream = NULL;
 
 	if (replace_video_stream) {
@@ -366,6 +367,7 @@ GstStreamCtl::init (MomentServer      * const moment,
 		    DeferredProcessor * const deferred_processor,
 		    ConstMemory         const stream_name,
 		    bool                const send_metadata,
+                    bool                const enable_prechunking,
 		    bool                const keep_video_stream,
 		    Uint64              const default_width,
 		    Uint64              const default_height,
@@ -373,12 +375,13 @@ GstStreamCtl::init (MomentServer      * const moment,
 		    Time                const no_video_timeout)
 {
     this->moment = moment;
-    this->timers = moment->getServerApp()->getTimers();
+    this->timers = moment->getServerApp()->getServerContext()->getTimers();
     this->page_pool = moment->getPagePool();
 
     this->stream_name = grab (new String (stream_name));
 
     this->send_metadata = send_metadata;
+    this->enable_prechunking = enable_prechunking;
     this->keep_video_stream = keep_video_stream;
 
     this->default_width = default_width;
@@ -404,6 +407,7 @@ GstStreamCtl::GstStreamCtl ()
       page_pool (NULL),
 
       send_metadata (true),
+      enable_prechunking (true),
 
       default_width (0),
       default_height (0),

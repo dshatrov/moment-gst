@@ -171,13 +171,14 @@ mt_const void
 Channel::init (MomentServer * const moment,
 	       ConstMemory    const channel_name,
 	       bool           const send_metadata,
+               bool           const enable_prechunking,
 	       bool           const keep_video_stream,
 	       Size           const default_width,
 	       Size           const default_height,
 	       Size           const default_bitrate,
 	       Time           const no_video_timeout)
 {
-    playback.init (moment->getServerApp()->getTimers());
+    playback.init (moment->getServerApp()->getServerContext()->getTimers());
     playback.setFrontend (CbDesc<Playback::Frontend> (
 	    &playback_frontend, this /* cb_data */, this /* coderef_container */));
 
@@ -186,6 +187,7 @@ Channel::init (MomentServer * const moment,
 		      moment->getServerApp()->getMainThreadContext()->getDeferredProcessor(),
 		      channel_name,
 		      send_metadata,
+                      enable_prechunking,
 		      keep_video_stream,
 		      default_width,
 		      default_height,

@@ -85,6 +85,7 @@ private:
     mt_const PagePool *page_pool;
 
     mt_const bool send_metadata;
+    mt_const bool enable_prechunking;
     mt_const bool keep_video_streams;
 
     mt_const Uint64 default_width;
