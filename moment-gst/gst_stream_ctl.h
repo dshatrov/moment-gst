@@ -203,7 +203,10 @@ public:
 			Uint64             default_bitrate,
 			Time               no_video_timeout);
 
+// TODO Unused?
+#if 0
     void release ();
+#endif
 
     mt_const void setFrontend (CbDesc<Frontend> const &frontend)
     {

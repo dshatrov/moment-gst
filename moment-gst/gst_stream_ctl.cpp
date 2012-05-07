@@ -119,7 +119,8 @@ GstStreamCtl::closeStream (bool const replace_video_stream)
     cur_stream_data = NULL;
 
     if (video_stream
-	&& !(keep_video_stream && replace_video_stream))
+        && replace_video_stream
+	&& !keep_video_stream)
     {
 	// TODO moment->replaceVideoStream() to swap video streams atomically
 	moment->removeVideoStream (video_stream_key);
@@ -393,6 +394,8 @@ GstStreamCtl::init (MomentServer      * const moment,
     deferred_reg.setDeferredProcessor (deferred_processor);
 }
 
+// TODO Unused?
+#if 0
 void
 GstStreamCtl::release ()
 {
@@ -400,6 +403,7 @@ GstStreamCtl::release ()
     closeStream (false /* replace_video_stream */);
     mutex.unlock ();
 }
+#endif
 
 GstStreamCtl::GstStreamCtl ()
     : moment (NULL),

@@ -85,6 +85,8 @@ private:
 
     mt_const Time no_video_timeout;
 
+    mt_const Ref<Thread> workqueue_thread;
+
     mt_mutex (mutex)
     mt_begin
 

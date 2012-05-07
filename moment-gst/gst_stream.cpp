@@ -673,6 +673,8 @@ GstStream::releasePipeline ()
     workqueue_cond.signal ();
 
     mutex.unlock ();
+
+    workqueue_thread->join ();
 }
 
 mt_mutex (mutex) void
@@ -2089,11 +2091,11 @@ GstStream::init (ConstMemory   const stream_name,
     this->initial_seek = initial_seek;
 
     {
-        Ref<Thread> const workqueue_thread =
+        workqueue_thread =
                 grab (new Thread (CbDesc<Thread::ThreadFunc> (workqueueThreadFunc,
                                                               this,
                                                               this)));
-        if (!workqueue_thread->spawn (false /* joinable */))
+        if (!workqueue_thread->spawn (true /* joinable */))
             logE_ (_func, "Failed to spawn workqueue thread: ", exc->toString());
     }
 

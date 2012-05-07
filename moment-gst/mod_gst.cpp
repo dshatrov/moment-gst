@@ -25,8 +25,6 @@ using namespace Moment;
 
 namespace MomentGst {
 
-static MomentGstModule gst_module;
-
 static void glibLoopThreadFunc (void * const /* cb_data */)
 {
     updateTime();
@@ -39,12 +37,27 @@ static void glibLoopThreadFunc (void * const /* cb_data */)
     logI_ (_func, "done");
 }
 
+static void serverDestroy (void * const _gst_module)
+{
+    MomentGstModule * const gst_module = static_cast <MomentGstModule*> (_gst_module);
+
+    logH_ (_func_);
+    gst_module->unref ();
+}
+
+static MomentServer::Events const server_events = {
+    serverDestroy
+};
+
 static void doMomentGstInit ()
 {
     logI_ (_func, "Initializing mod_gst");
 
     MomentServer * const moment = MomentServer::getInstance();
     MConfig::Config * const config = moment->getConfig();
+
+    MomentGstModule * const gst_module = new MomentGstModule;
+    moment->getEventInformer()->subscribe (CbDesc<MomentServer::Events> (&server_events, gst_module, NULL));
 
     {
 	ConstMemory const opt_name = "mod_gst/enable";
@@ -86,8 +99,8 @@ static void doMomentGstInit ()
 	}
     }
 
-    if (!gst_module.init (MomentServer::getInstance()))
-	logE_ (_func, "gst_module.init() failed");
+    if (!gst_module->init (MomentServer::getInstance()))
+	logE_ (_func, "gst_module->init() failed");
 }
 
 // Initialization from a separate thread to cure deadlocks with glibc 1.14
