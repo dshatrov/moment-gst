@@ -45,6 +45,8 @@ private:
 	mt_const Ref<String> channel_name;
 	mt_const Ref<String> channel_desc;
 	mt_const Ref<String> playlist_filename;
+
+        mt_const Ref<PushAgent> push_agent;
     };
 
     typedef Hash< ChannelEntry,
@@ -87,6 +89,8 @@ private:
     mt_const bool send_metadata;
     mt_const bool enable_prechunking;
     mt_const bool keep_video_streams;
+    mt_const bool default_connect_on_demand;
+    mt_const Time default_connect_on_demand_timeout;
 
     mt_const Uint64 default_width;
     mt_const Uint64 default_height;
@@ -136,21 +140,28 @@ private:
 
     mt_end
 
-    void createPlaylistChannel (ConstMemory channel_name,
-				ConstMemory channel_desc,
-				ConstMemory playlist_filename,
-				bool        recording,
-				ConstMemory record_filename);
+    void createPlaylistChannel (ConstMemory  channel_name,
+				ConstMemory  channel_desc,
+				ConstMemory  playlist_filename,
+				bool         recording,
+				ConstMemory  record_filename,
+                                bool         connect_on_demand,
+                                Time         connect_on_demand_timeout,
+                                PushAgent   *push_agent = NULL);
 
-    void createStreamChannel (ConstMemory stream_name,
-			      ConstMemory channel_desc,
-			      ConstMemory stream_spec,
-			      bool        is_chain,
-			      bool        recording,
-			      ConstMemory record_filename);
+    void createStreamChannel (ConstMemory  stream_name,
+			      ConstMemory  channel_desc,
+			      ConstMemory  stream_spec,
+			      bool         is_chain,
+			      bool         recording,
+			      ConstMemory  record_filename,
+                              bool         connect_on_demand,
+                              Time         connect_on_demand_timeout,
+                              PushAgent   *push_agent = NULL);
 
-    void createDummyChannel (ConstMemory channel_name,
-			     ConstMemory channel_desc);
+    void createDummyChannel (ConstMemory  channel_name,
+			     ConstMemory  channel_desc,
+                             PushAgent   *push_agent = NULL);
 
     void createPlaylistRecorder (ConstMemory recorder_name,
 				 ConstMemory playlist_filename,
@@ -162,7 +173,7 @@ private:
 
     void parseSourcesConfigSection ();
     void parseChainsConfigSection ();
-    void parseStreamsConfigSection ();
+    Result parseStreamsConfigSection ();
     void parseRecordingsConfigSection ();
 
 public:

@@ -167,6 +167,8 @@ private:
       // Bytes generated (video fakesink's sink pad).
       Uint64 rx_video_bytes;
 
+      LibMary_ThreadLocal *tlocal;
+
     mt_end
 
     mt_const Cb<Frontend> frontend;

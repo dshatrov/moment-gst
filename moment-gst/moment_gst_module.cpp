@@ -158,17 +158,22 @@ MomentGstModule::setPosition (ConstMemory const channel_name,
 }
 
 void
-MomentGstModule::createPlaylistChannel (ConstMemory const channel_name,
-					ConstMemory const channel_desc,
-					ConstMemory const playlist_filename,
-					bool        const recording,
-					ConstMemory const record_filename)
+MomentGstModule::createPlaylistChannel (ConstMemory   const channel_name,
+					ConstMemory   const channel_desc,
+					ConstMemory   const playlist_filename,
+					bool          const recording,
+					ConstMemory   const record_filename,
+                                        bool          const connect_on_demand,
+                                        Time          const connect_on_demand_timeout,
+                                        PushAgent   * const push_agent)
 {
     ChannelEntry * const channel_entry = new ChannelEntry;
 
     channel_entry->channel_name = grab (new String (channel_name));
     channel_entry->channel_desc = grab (new String (channel_desc));
     channel_entry->playlist_filename = grab (new String (playlist_filename));
+
+    channel_entry->push_agent = push_agent;
 
     Ref<Channel> const channel = grab (new Channel);
     channel_entry->channel = channel;
@@ -178,6 +183,8 @@ MomentGstModule::createPlaylistChannel (ConstMemory const channel_name,
 		   send_metadata,
                    enable_prechunking,
 		   keep_video_streams,
+                   connect_on_demand,
+                   connect_on_demand_timeout,
 		   default_width,
 		   default_height,
 		   default_bitrate,
@@ -199,12 +206,15 @@ MomentGstModule::createPlaylistChannel (ConstMemory const channel_name,
 }
 
 void
-MomentGstModule::createStreamChannel (ConstMemory const channel_name,
-				      ConstMemory const channel_desc,
-				      ConstMemory const stream_spec,
-				      bool        const is_chain,
-				      bool        const recording,
-				      ConstMemory const record_filename)
+MomentGstModule::createStreamChannel (ConstMemory   const channel_name,
+				      ConstMemory   const channel_desc,
+				      ConstMemory   const stream_spec,
+				      bool          const is_chain,
+				      bool          const recording,
+				      ConstMemory   const record_filename,
+                                      bool          const connect_on_demand,
+                                      Time          const connect_on_demand_timeout,
+                                      PushAgent   * const push_agent)
 {
     logD_ (_func, "channel: ", channel_name, ",", is_chain ? "chain" : "uri", ": ", stream_spec);
 
@@ -214,6 +224,8 @@ MomentGstModule::createStreamChannel (ConstMemory const channel_name,
     channel_entry->channel_desc = grab (new String (channel_desc));
     channel_entry->playlist_filename = NULL;
 
+    channel_entry->push_agent = push_agent;
+
     Ref<Channel> const channel = grab (new Channel);
     channel_entry->channel = channel;
 
@@ -222,6 +234,8 @@ MomentGstModule::createStreamChannel (ConstMemory const channel_name,
 		   send_metadata,
                    enable_prechunking,
 		   keep_video_streams,
+                   connect_on_demand,
+                   connect_on_demand_timeout,
 		   default_width,
 		   default_height,
 		   default_bitrate,
@@ -239,13 +253,17 @@ MomentGstModule::createStreamChannel (ConstMemory const channel_name,
 }
 
 void
-MomentGstModule::createDummyChannel (ConstMemory const channel_name,
-				     ConstMemory const channel_desc)
+MomentGstModule::createDummyChannel (ConstMemory   const channel_name,
+				     ConstMemory   const channel_desc,
+                                     PushAgent   * const push_agent)
 {
     ChannelEntry * const channel_entry = new ChannelEntry;
+
     channel_entry->channel_name = grab (new String (channel_name));
     channel_entry->channel_desc = grab (new String (channel_desc));
     channel_entry->playlist_filename = NULL;
+
+    channel_entry->push_agent = push_agent;
 
     Ref<Channel> const channel = grab (new Channel);
     channel_entry->channel = channel;
@@ -255,6 +273,8 @@ MomentGstModule::createDummyChannel (ConstMemory const channel_name,
 		   send_metadata,
                    enable_prechunking,
 		   keep_video_streams,
+                   false /* connect_on_demand */,
+                   60    /* connect_on_demand_timeout */,
 		   default_width,
 		   default_height,
 		   default_bitrate,
@@ -573,7 +593,9 @@ MomentGstModule::adminHttpRequest (HttpRequest  * const mt_nonnull req,
 				       src_chain,
 				       true /* is_chain */,
 				       false /* recording */,
-				       ConstMemory() /* record_path */);
+				       ConstMemory() /* record_path */,
+                                       self->default_connect_on_demand,
+                                       self->default_connect_on_demand_timeout);
 	} else
 	if (src_path.len()) {
 	    self->createStreamChannel (channel_name,
@@ -581,7 +603,9 @@ MomentGstModule::adminHttpRequest (HttpRequest  * const mt_nonnull req,
 				       makeString ("file://", src_path)->mem(),
 				       false /* is_chain */,
 				       false /* recording */,
-				       ConstMemory() /* record_path */);
+				       ConstMemory() /* record_path */,
+                                       self->default_connect_on_demand,
+                                       self->default_connect_on_demand_timeout);
 	} else
 	if (src_uri.len()) {
 	    self->createStreamChannel (channel_name,
@@ -589,14 +613,18 @@ MomentGstModule::adminHttpRequest (HttpRequest  * const mt_nonnull req,
 				       src_uri,
 				       false /* is_chain */,
 				       false /* recording */,
-				       ConstMemory() /* record_path */);
+				       ConstMemory() /* record_path */,
+                                       self->default_connect_on_demand,
+                                       self->default_connect_on_demand_timeout);
 	} else
 	if (src_playlist.len()) {
 	    self->createPlaylistChannel (channel_name,
 					 ConstMemory() /* channel_desc */,
 					 src_playlist,
 					 false /* recording */,
-					 ConstMemory() /* record_path */);
+					 ConstMemory() /* record_path */,
+                                         self->default_connect_on_demand,
+                                         self->default_connect_on_demand_timeout);
 	}
     } else
     if (req->getNumPathElems() >= 2
@@ -1056,7 +1084,9 @@ MomentGstModule::parseSourcesConfigSection ()
 				 stream_uri,
 				 false /* is_chain */,
 				 false /* recording */,
-				 ConstMemory() /* record_filename */);
+				 ConstMemory() /* record_filename */,
+                                 default_connect_on_demand,
+                                 default_connect_on_demand_timeout);
 	}
     }
 }
@@ -1135,7 +1165,9 @@ MomentGstModule::parseChainsConfigSection ()
 				 chain_spec,
 				 true /* is_chain */,
 				 false /* recording */,
-				 ConstMemory() /* record_filename */);
+				 ConstMemory() /* record_filename */,
+                                 default_connect_on_demand,
+                                 default_connect_on_demand_timeout);
 	} else
 	if (section_entry->getType() == MConfig::SectionEntry::Type_Section) {
 	    MConfig::Section * const section = static_cast <MConfig::Section*> (section_entry);
@@ -1198,12 +1230,14 @@ MomentGstModule::parseChainsConfigSection ()
 				 chain_spec,
 				 true /* is_chain */,
 				 got_record_path /* recording */,
-				 record_path);
+				 record_path,
+                                 default_connect_on_demand,
+                                 default_connect_on_demand_timeout);
 	}
     }
 }
 
-void
+Result
 MomentGstModule::parseStreamsConfigSection ()
 {
     logD_ (_func_);
@@ -1212,7 +1246,7 @@ MomentGstModule::parseStreamsConfigSection ()
 
     MConfig::Section * const streams_section = config->getSection ("mod_gst/streams");
     if (!streams_section)
-	return;
+	return Result::Success;;
 
     MConfig::Section::iter streams_iter (*streams_section);
     while (!streams_section->iter_done (streams_iter)) {
@@ -1296,13 +1330,126 @@ MomentGstModule::parseStreamsConfigSection ()
 		}
 	    }
 
+            bool connect_on_demand = default_connect_on_demand;
+            {
+                ConstMemory const opt_name = "mod_gst/connect_on_demand";
+                MConfig::Config::BooleanValue const val = config->getBoolean (opt_name);
+                if (val == MConfig::Config::Boolean_Invalid) {
+                    logE_ (_func, "Invalid value for ", opt_name, ": ", config->getString (opt_name));
+                    return Result::Failure;
+                }
+
+                if (val == MConfig::Config::Boolean_True)
+                    connect_on_demand = true;
+                else
+                if (val == MConfig::Config::Boolean_False)
+                    connect_on_demand = false;
+                else
+                    assert (val == MConfig::Config::Boolean_Default);
+            }
+
+            Time connect_on_demand_timeout = default_connect_on_demand_timeout;
+            {
+                ConstMemory const opt_name = "mod_gst/connect_on_demand_timeout";
+                Uint64 tmp_uint64;
+                MConfig::GetResult const res = config->getUint64_default (
+                        opt_name, &tmp_uint64, connect_on_demand_timeout);
+                if (!res) {
+                    logE_ (_func, "Invalid value for ", opt_name, ": ", config->getString (opt_name));
+                    return Result::Failure;
+                }
+                connect_on_demand_timeout = (Time) tmp_uint64;
+            }
+
+            Ref<PushAgent> push_agent;
+#if 0
+// TODO
+            {
+                Ref<String> push_uri;
+                {
+                    ConstMemory const opt_name = "push_uri";
+                    MConfig::Option * const opt = item_section->getOption (opt_name);
+                    if (opt && opt->getValue()) {
+                        push_uri = opt->getValue()->getAsString();
+                        logD_ (_func, opt_name, ": ", push_uri);
+                    } else {
+                        push_uri = grab (new String);
+                    }
+                }
+
+                Ref<String> push_server;
+                {
+                    ConstMemory const opt_name = "push_server";
+                    MConfig::Option * const opt = item_section->getOption (opt_name);
+                    if (opt && opt->getValue()) {
+                        push_server = opt->getValue()->getAsString();
+                        logD_ (_func, opt_name, ": ", push_server);
+                    } else {
+                        push_server = grab (new String);
+                    }
+                }
+
+                Uint64 push_port = 1935;
+                {
+                    ConstMemory const opt_name = "push_port";
+                    MConfig::Option * const opt = item_section->getOption (opt_name);
+                    if (opt && opt->getValue()) {
+                        if (!opt->getValue()->getAsUint64 (&push_port)) {
+                            logE_ (_func, "Bad value for \"", opt_name, "\" option: ", opt->getValue()->mem());
+                            return Result::Failure;
+                        }
+                        logD_ (_func, opt_name, ": ", push_port);
+                    } else {
+                        if (push_server && !push_server->isNull())
+                            logD_ (_func, "Default push_port: ", push_port);
+                    }
+                }
+
+                Ref<String> push_username;
+                {
+                    ConstMemory const opt_name = "push_username";
+                    MConfig::Option * const opt = item_section->getOption (opt_name);
+                    if (opt && opt->getValue()) {
+                        push_username = opt->getValue()->getAsString();
+                        logD_ (_func, opt_name, ": ", push_username);
+                    } else {
+                        push_username = grab (new String);
+                    }
+                }
+
+                Ref<String> push_password;
+                {
+                    ConstMemory const opt_name = "push_password";
+                    MConfig::Option * const opt = item_section->getOption (opt_name);
+                    if (opt && opt->getValue()) {
+                        push_password = opt->getValue()->getAsString();
+                        logD_ (_func, opt_name, ": ", push_password);
+                    } else {
+                        push_password = grab (new String);
+                    }
+                }
+
+                Ref<PushProtocol> const push_protocol = moment->getPushProtocolForUri (push_uri->mem());
+
+                push_agent = grab (new PushAgent);
+                push_agent->init (stream_name->mem(),
+                                  push_protocol,
+                                  push_uri->mem(),
+                                  push_username->mem(),
+                                  push_password->mem());
+            }
+#endif
+
 	    if (chain && !chain->isNull()) {
 		createStreamChannel (stream_name->mem(),
 				     channel_desc->mem(),
 				     chain->mem(),
 				     true /* is_chain */,
 				     record_path ? true : false /* recording */,
-				     record_path ? record_path->mem() : ConstMemory());
+				     record_path ? record_path->mem() : ConstMemory(),
+                                     connect_on_demand,
+                                     connect_on_demand_timeout,
+                                     push_agent);
 	    } else
 	    if (uri && !uri->isNull()) {
 		createStreamChannel (stream_name->mem(),
@@ -1310,7 +1457,10 @@ MomentGstModule::parseStreamsConfigSection ()
 				     uri->mem(),
 				     false /* is_chain */,
 				     record_path ? true : false /* recording */,
-				     record_path ? record_path->mem() : ConstMemory());
+				     record_path ? record_path->mem() : ConstMemory(),
+                                     connect_on_demand,
+                                     connect_on_demand_timeout,
+                                     push_agent);
 	    } else
 	    if (playlist && !playlist->isNull()) {
 		logD_ (_func, "playlist: ", playlist);
@@ -1318,13 +1468,19 @@ MomentGstModule::parseStreamsConfigSection ()
 				       channel_desc->mem(),
 				       playlist->mem(),
 				       record_path ? true : false /* recording */,
-				       record_path ? record_path->mem() : ConstMemory());
+				       record_path ? record_path->mem() : ConstMemory(),
+                                       connect_on_demand,
+                                       connect_on_demand_timeout,
+                                       push_agent);
 	    } else {
 		logW_ (_func, "None of chain/uri/playlist specified for stream \"", stream_name, "\"");
-		createDummyChannel (stream_name->mem(), channel_desc->mem());
+		createDummyChannel (stream_name->mem(), channel_desc->mem(), push_agent);
 	    }
+
 	}
     }
+
+    return Result::Success;
 }
 
 void
@@ -1500,6 +1656,33 @@ MomentGstModule::init (MomentServer * const moment)
     }
 
     {
+        ConstMemory const opt_name = "mod_gst/connect_on_demand";
+        MConfig::Config::BooleanValue const val = config->getBoolean (opt_name);
+        if (val == MConfig::Config::Boolean_Invalid) {
+            logE_ (_func, "Invalid value for ", opt_name, ": ", config->getString (opt_name));
+            return Result::Failure;
+        }
+
+        if (val == MConfig::Config::Boolean_True) {
+            default_connect_on_demand = true;
+        } else {
+            default_connect_on_demand = false;
+        }
+    }
+
+    {
+        ConstMemory const opt_name = "mod_gst/connect_on_demand_timeout";
+        Uint64 tmp_uint64;
+        MConfig::GetResult const res = config->getUint64_default (
+                opt_name, &tmp_uint64, default_connect_on_demand_timeout);
+        if (!res) {
+            logE_ (_func, "Invalid value for ", opt_name, ": ", config->getString (opt_name));
+            return Result::Failure;
+        }
+        default_connect_on_demand_timeout = (Time) tmp_uint64;
+    }
+
+    {
 	ConstMemory const opt_name = "moment/this_rtmpt_server_addr";
 	ConstMemory const opt_val = config->getString (opt_name);
 	logI_ (_func, opt_name, ": ", opt_val);
@@ -1530,7 +1713,10 @@ MomentGstModule::init (MomentServer * const moment)
 
     parseSourcesConfigSection ();
     parseChainsConfigSection ();
-    parseStreamsConfigSection ();
+
+    if (!parseStreamsConfigSection ())
+        return Result::Failure;
+
     parseRecordingsConfigSection ();
 
     return Result::Success;
@@ -1542,6 +1728,9 @@ MomentGstModule::MomentGstModule()
       page_pool (NULL),
       send_metadata (false),
       enable_prechunking (false),
+      keep_video_streams (false),
+      default_connect_on_demand (false),
+      default_connect_on_demand_timeout (60),
       default_width (0),
       default_height (0),
       default_bitrate (500000),

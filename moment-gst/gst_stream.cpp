@@ -39,9 +39,11 @@ GstStream::workqueueThreadFunc (void * const _self)
 
     updateTime ();
 
-    for (;;) {
-        self->mutex.lock ();
+    self->mutex.lock ();
 
+    self->tlocal = libMary_getThreadLocal();
+
+    for (;;) {
         if (self->stream_closed) {
             self->mutex.unlock ();
             return;
@@ -72,6 +74,8 @@ GstStream::workqueueThreadFunc (void * const _self)
             default:
                 unreachable ();
         }
+
+        self->mutex.lock ();
     }
 }
 
@@ -672,9 +676,14 @@ GstStream::releasePipeline ()
     workqueue_list.prepend (new_item);
     workqueue_cond.signal ();
 
+    bool const join = (tlocal != libMary_getThreadLocal());
+
     mutex.unlock ();
 
-    workqueue_thread->join ();
+    if (join) {
+        //#error joining from the same thread - WRONG
+        workqueue_thread->join ();
+    }
 }
 
 mt_mutex (mutex) void
@@ -697,6 +706,7 @@ GstStream::reportMetaData ()
     }
 
     logD (stream, _func, "Firing video message");
+    // TODO unlock/lock?
     video_stream->fireVideoMessage (&msg);
 
     page_pool->msgUnref (msg.page_list.first);
@@ -1124,6 +1134,7 @@ GstStream::doAudioData (GstBuffer * const buffer)
 	    msg.msg_len = msg_len;
 	    msg.msg_offset = 0;
 
+            // TODO unlock/lock?
 	    video_stream->fireAudioMessage (&msg);
 
 	    page_pool->msgUnref (page_list.first);
@@ -1191,6 +1202,7 @@ GstStream::doAudioData (GstBuffer * const buffer)
 
 //    logD_ (_func, fmt_hex, msg.timestamp);
 
+    // TODO unlock/lock?
     video_stream->fireAudioMessage (&msg);
 
     page_pool->msgUnref (page_list.first);
@@ -1377,12 +1389,39 @@ GstStream::doVideoData (GstBuffer * const buffer)
     if (avc_codec_data_buffer) {
       // Reporting AVC codec data if needed.
 
+        // Timestamps for codec data buffers are seemingly random.
+//	Uint64 const timestamp = (Uint64) (GST_BUFFER_TIMESTAMP (avc_codec_data_buffer) / 1000000);
+        Uint64 const timestamp = 0;
+
+        {
+            VideoStream::VideoMessage msg;
+
+            msg.timestamp = timestamp;
+            msg.codec_id = VideoStream::VideoCodecId::AVC;
+            msg.frame_type = VideoStream::VideoFrameType::AvcEndOfSequence;
+
+            msg.page_pool = page_pool;
+            msg.prechunk_size = 0;
+            msg.msg_offset = 0;
+
+          // TODO Send AvcEndOfSequence only when AvcSequenceHeader was sent.
+            Byte avc_video_hdr [5] = { 0x17, 2, 0, 0, 0 }; // AVC, seekable frame;
+                                                           // AVC end of sequence;
+                                                           // Composition time offset = 0.
+
+            // TODO FIXME This should be done in mod_rtmp.
+            msg.page_pool->getFillPages (&msg.page_list, ConstMemory::forObject (avc_video_hdr));
+
+            msg.msg_len = sizeof (avc_video_hdr);
+
+            video_stream->fireVideoMessage (&msg);
+        }
+
 	Size msg_len = 0;
 
 	PagePool::PageListHead page_list;
 	RtmpConnection::PrechunkContext prechunk_ctx;
 
-	Uint64 const timestamp = (Uint64) (GST_BUFFER_TIMESTAMP (avc_codec_data_buffer) / 1000000);
 	Byte avc_video_hdr [5] = { 0x17, 0, 0, 0, 0 }; // AVC, seekable frame;
 						       // AVC sequence header;
 						       // Composition time offset = 0.
@@ -1446,10 +1485,11 @@ GstStream::doVideoData (GstBuffer * const buffer)
 	msg.msg_len = msg_len;
 	msg.msg_offset = 0;
 
+        // TODO unlock/lock?
 	video_stream->fireVideoMessage (&msg);
 
 	page_pool->msgUnref (page_list.first);
-    }
+    } // if (avc_codec_data_buffer)
 
     if (skip_frame) {
 	logD (frames, "skipping frame");
@@ -1561,6 +1601,7 @@ GstStream::doVideoData (GstBuffer * const buffer)
     msg.msg_offset = 0;
 
 //    logD_ (_func, "firing video message, ", msg_len, " bytes");
+    // TODO unlock/lock?
     video_stream->fireVideoMessage (&msg);
 
     page_pool->msgUnref (page_list.first);
@@ -1762,7 +1803,8 @@ VideoStream::EventHandler GstStream::mix_stream_handler = {
     mixStreamAudioMessage,
     mixStreamVideoMessage,
     NULL /* rtmpCommandMessage */,
-    NULL /* closed */
+    NULL /* closed */,
+    NULL /* numWatchersChanged */
 };
 
 void
@@ -2195,7 +2237,9 @@ GstStream::GstStream ()
 
       rx_bytes (0),
       rx_audio_bytes (0),
-      rx_video_bytes (0)
+      rx_video_bytes (0),
+
+      tlocal (NULL)
 {
 }
 

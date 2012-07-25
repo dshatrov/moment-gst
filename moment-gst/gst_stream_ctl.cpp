@@ -25,6 +25,119 @@ using namespace Moment;
 
 namespace MomentGst {
 
+VideoStream::EventHandler const GstStreamCtl::stream_event_handler = {
+    NULL /* audioMessage */,
+    NULL /* videoMessage */,
+    NULL /* rtmpCommandMessage */,
+    NULL /* closed */,
+    numWatchersChanged
+};
+
+void
+GstStreamCtl::numWatchersChanged (Count   const num_watchers,
+                                  void  * const _stream_data)
+{
+    logD_ (_func, num_watchers);
+
+    StreamData * const stream_data = static_cast <StreamData*> (_stream_data);
+    GstStreamCtl * const self = stream_data->gst_stream_ctl;
+
+    self->mutex.lock ();
+    if (stream_data != self->cur_stream_data /* ||
+	stream_data->stream_closed */)
+    {
+	self->mutex.unlock ();
+	return;
+    }
+
+    stream_data->num_watchers = num_watchers;
+
+    if (num_watchers == 0) {
+        if (!self->connect_on_demand_timer) {
+            logD_ (_func, "starting timer, timeout: ", self->connect_on_demand_timeout);
+            self->connect_on_demand_timer = self->timers->addTimer (
+                    CbDesc<Timers::TimerCallback> (connectOnDemandTimerTick,
+                                                   stream_data /* cb_data */,
+                                                   self        /* coderef_container */,
+                                                   stream_data /* ref_data */),
+                    self->connect_on_demand_timeout,
+                    false /* periodical */);
+        }
+    } else {
+        if (self->connect_on_demand_timer) {
+            self->timers->deleteTimer (self->connect_on_demand_timer);
+            self->connect_on_demand_timer = NULL;
+        }
+
+        if (!self->gst_stream
+            && !self->stream_stopped)
+        {
+            logD_ (_func, "connecting on demand");
+            mt_unlocks (mutex) self->doRestartStream (true /* from_ondemand_reconnect */);
+            return;
+        }
+    }
+
+    self->mutex.unlock ();
+}
+
+void
+GstStreamCtl::connectOnDemandTimerTick (void * const _stream_data)
+{
+    logD_ (_func_);
+
+    StreamData * const stream_data = static_cast <StreamData*> (_stream_data);
+    GstStreamCtl * const self = stream_data->gst_stream_ctl;
+
+    self->mutex.lock ();
+    if (stream_data != self->cur_stream_data /* ||
+	stream_data->stream_closed */)
+    {
+	self->mutex.unlock ();
+	return;
+    }
+
+    if (stream_data->num_watchers == 0) {
+        logD_ (_func, "disconnecting on timeout");
+        self->closeStream (true /* replace_video_stream */);
+    }
+
+    self->mutex.unlock ();
+}
+
+mt_mutex (mutex) void
+GstStreamCtl::beginConnectOnDemand (bool const start_timer)
+{
+    assert (video_stream);
+
+    if (!connect_on_demand || stream_stopped)
+        return;
+
+    video_stream->lock ();
+
+    if (start_timer
+        && video_stream->getNumWatchers_unlocked() == 0)
+    {
+        logD_ (_func, "starting timer, timeout: ", connect_on_demand_timeout);
+        connect_on_demand_timer = timers->addTimer (
+                CbDesc<Timers::TimerCallback> (connectOnDemandTimerTick,
+                                               cur_stream_data /* cb_data */,
+                                               this        /* coderef_container */,
+                                               cur_stream_data /* ref_data */),
+                connect_on_demand_timeout,
+                false /* periodical */);
+    }
+
+    video_stream_events_sbn = video_stream->getEventInformer()->subscribe_unlocked (
+            CbDesc<VideoStream::EventHandler> (
+                    &stream_event_handler,
+                    cur_stream_data /* cb_data */,
+                    this        /* coderef_container */,
+                    cur_stream_data /* ref_data */));
+
+    video_stream->unlock ();
+}
+
 mt_mutex (mutex) void
 GstStreamCtl::createStream (Time const initial_seek)
 {
@@ -36,13 +149,28 @@ GstStreamCtl::createStream (Time const initial_seek)
     }
  */
 
+    stream_stopped = false;
+
     got_video = false;
+
+    if (!cur_stream_data) {
+        Ref<StreamData> const stream_data = grab (new StreamData (
+                this, stream_ticket, stream_ticket_ref.ptr()));
+        cur_stream_data = stream_data;
+    }
+
+    if (video_stream && video_stream_events_sbn) {
+        video_stream->getEventInformer()->unsubscribe (video_stream_events_sbn);
+        video_stream_events_sbn = NULL;
+    }
 
     if (!video_stream) {
 	video_stream = grab (new VideoStream);
 	logD_ (_func, "Calling moment->addVideoStream, stream_name: ", stream_name->mem());
 	video_stream_key = moment->addVideoStream (video_stream, stream_name->mem());
     }
+
+    beginConnectOnDemand (true /* start_timer */);
 
     if (stream_start_time == 0)
 	stream_start_time = getTime();
@@ -63,15 +191,11 @@ GstStreamCtl::createStream (Time const initial_seek)
 		      default_bitrate,
 		      no_video_timeout);
 
-    Ref<StreamData> const stream_data = grab (new StreamData (
-	    this, stream_ticket, stream_ticket_ref.ptr()));
-    cur_stream_data = stream_data;
-
     gst_stream->setFrontend (CbDesc<GstStream::Frontend> (
 	    &gst_stream_frontend,
-	    stream_data /* cb_data */,
-	    this /* coderef_container */,
-	    stream_data /* ref_data */));
+	    cur_stream_data /* cb_data */,
+	    this            /* coderef_container */,
+	    cur_stream_data /* ref_data */));
 
     {
 	gst_stream->ref ();
@@ -103,6 +227,11 @@ GstStreamCtl::closeStream (bool const replace_video_stream)
 
     got_video = false;
 
+    if (connect_on_demand_timer) {
+        timers->deleteTimer (connect_on_demand_timer);
+        connect_on_demand_timer = NULL;
+    }
+
     if (gst_stream) {
 	{
 	    GstStream::TrafficStats traffic_stats;
@@ -125,12 +254,28 @@ GstStreamCtl::closeStream (bool const replace_video_stream)
 	// TODO moment->replaceVideoStream() to swap video streams atomically
 	moment->removeVideoStream (video_stream_key);
 	video_stream->close ();
+
+        if (video_stream_events_sbn) {
+            video_stream->getEventInformer()->unsubscribe (video_stream_events_sbn);
+            video_stream_events_sbn = NULL;
+        }
+
 	video_stream = NULL;
 
 	if (replace_video_stream) {
+            {
+                assert (!cur_stream_data);
+
+                Ref<StreamData> const stream_data = grab (new StreamData (
+                        this, stream_ticket, stream_ticket_ref.ptr()));
+                cur_stream_data = stream_data;
+            }
+
 	    video_stream = grab (new VideoStream);
 	    logD_ (_func, "Calling moment->addVideoStream, stream_name: ", stream_name->mem());
 	    video_stream_key = moment->addVideoStream (video_stream, stream_name->mem());
+
+            beginConnectOnDemand (false /* start_timer */);
 	}
     }
 
@@ -138,11 +283,17 @@ GstStreamCtl::closeStream (bool const replace_video_stream)
 }
 
 mt_unlocks (mutex) void
-GstStreamCtl::doRestartStream ()
+GstStreamCtl::doRestartStream (bool const from_ondemand_reconnect)
 {
     logD_ (_func_);
 
-    closeStream (true /* replace_video_stream */);
+    bool new_video_stream = false;
+    if (!gst_stream
+        && !from_ondemand_reconnect)
+    {
+        closeStream (true /* replace_video_stream */);
+        new_video_stream = true;
+    }
 
     // TODO FIXME Set correct initial seek
     createStream (0 /* initial_seek */);
@@ -152,8 +303,10 @@ GstStreamCtl::doRestartStream ()
 
     mutex.unlock ();
 
-    if (frontend)
-	frontend.call (frontend->newVideoStream, tmp_stream_ticket);
+    if (new_video_stream) {
+        if (frontend)
+            frontend.call (frontend->newVideoStream, tmp_stream_ticket);
+    }
 }
 
 bool
@@ -261,6 +414,13 @@ GstStreamCtl::gotVideo (void * const _stream_data)
     GstStreamCtl * const self = stream_data->gst_stream_ctl;
 
     self->mutex.lock ();
+    if (stream_data != self->cur_stream_data ||
+	stream_data->stream_closed)
+    {
+	self->mutex.unlock ();
+	return;
+    }
+
     self->got_video = true;
     self->mutex.unlock ();
 }
@@ -303,9 +463,12 @@ void
 GstStreamCtl::endVideoStream ()
 {
     mutex.lock ();
-    if (gst_stream) {
+
+    stream_stopped = true;
+
+    if (gst_stream)
 	closeStream (true /* replace_video_stream */);
-    }
+
     mutex.unlock ();
 }
 
@@ -370,6 +533,8 @@ GstStreamCtl::init (MomentServer      * const moment,
 		    bool                const send_metadata,
                     bool                const enable_prechunking,
 		    bool                const keep_video_stream,
+                    bool                const connect_on_demand,
+                    Time                const connect_on_demand_timeout,
 		    Uint64              const default_width,
 		    Uint64              const default_height,
 		    Uint64              const default_bitrate,
@@ -384,6 +549,9 @@ GstStreamCtl::init (MomentServer      * const moment,
     this->send_metadata = send_metadata;
     this->enable_prechunking = enable_prechunking;
     this->keep_video_stream = keep_video_stream;
+
+    this->connect_on_demand = connect_on_demand;
+    this->connect_on_demand_timeout = connect_on_demand_timeout;
 
     this->default_width = default_width;
     this->default_height = default_height;
@@ -423,7 +591,10 @@ GstStreamCtl::GstStreamCtl ()
 
       stream_ticket (NULL),
 
+      stream_stopped (false),
       got_video (false),
+
+      connect_on_demand_timer (NULL),
 
       stream_start_time (0),
 
@@ -446,6 +617,12 @@ GstStreamCtl::~GstStreamCtl ()
         gst_stream->releasePipeline ();
         gst_stream = NULL;
     }
+
+    if (connect_on_demand_timer) {
+        timers->deleteTimer (connect_on_demand_timer);
+        connect_on_demand_timer = NULL;
+    }
+
     mutex.unlock ();
 
     deferred_reg.release ();

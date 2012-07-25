@@ -79,6 +79,9 @@ private:
     mt_const bool enable_prechunking;
     mt_const bool keep_video_stream;
 
+    mt_const bool connect_on_demand;
+    mt_const Time connect_on_demand_timeout;
+
     mt_const Uint64 default_width;
     mt_const Uint64 default_height;
     mt_const Uint64 default_bitrate;
@@ -101,6 +104,7 @@ private:
 	VirtRef const stream_ticket_ref;
 
 	mt_mutex (GstStreamCtl::mutex) bool stream_closed;
+        mt_mutex (GstStreamCtl::mutex) Count num_watchers;
 
 	StreamData (GstStreamCtl   * const gst_stream_ctl,
 		    void           * const stream_ticket,
@@ -108,7 +112,8 @@ private:
 	    : gst_stream_ctl (gst_stream_ctl),
 	      stream_ticket (stream_ticket),
 	      stream_ticket_ref (stream_ticket_ref),
-	      stream_closed (false)
+	      stream_closed (false),
+              num_watchers (0)
 	{
 	}
     };
@@ -118,12 +123,16 @@ private:
     mt_mutex (mutex) Ref<StreamData> cur_stream_data;
 
     mt_mutex (mutex) Ref<VideoStream> video_stream;
+    mt_mutex (mutex) GenericInformer::SubscriptionKey video_stream_events_sbn;
     mt_mutex (mutex) MomentServer::VideoStreamKey video_stream_key;
 
     mt_mutex (mutex) void *stream_ticket;
     mt_mutex (mutex) VirtRef stream_ticket_ref;
 
+    mt_mutex (mutex) bool stream_stopped;
     mt_mutex (mutex) bool got_video;
+
+    mt_mutex (mutex) Timers::TimerKey connect_on_demand_timer;
 
     mt_mutex (mutex) Time stream_start_time;
 
@@ -137,7 +146,18 @@ private:
 
     mt_const Cb<Frontend> frontend;
 
-    class CreateVideoStream_Data;
+    mt_iface (VideoStream::EventHandler)
+
+        static VideoStream::EventHandler const stream_event_handler;
+
+        static void numWatchersChanged (Count  num_watchers,
+                                        void  *_data);
+
+    mt_iface_end
+
+    static void connectOnDemandTimerTick (void *_stream_data);
+
+    void beginConnectOnDemand (bool start_timer);
 
     mt_mutex (mutex) void createStream (Time initial_seek);
 
@@ -145,7 +165,7 @@ private:
 
     mt_mutex (mutex) void closeStream (bool replace_video_stream);
 
-    mt_unlocks (mutex) void doRestartStream ();
+    mt_unlocks (mutex) void doRestartStream (bool from_ondemand_reconnect = false);
 
     static bool deferredTask (void *_self);
 
@@ -198,6 +218,8 @@ public:
 			bool               send_metadata,
                         bool               enable_prechunking,
 			bool               keep_video_stream,
+                        bool               connect_on_demand,
+                        Time               connect_on_demand_timeout,
 			Uint64             default_width,
 			Uint64             default_height,
 			Uint64             default_bitrate,

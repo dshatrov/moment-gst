@@ -165,6 +165,8 @@ public:
 			bool          send_metadata,
                         bool          enable_prechunking,
 			bool          keep_video_stream,
+                        bool          connect_on_demand,
+                        Time          connect_on_demand_timeout,
 			Size          default_width,
 			Size          default_height,
 			Size          default_bitrate,
