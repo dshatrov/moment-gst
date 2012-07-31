@@ -1435,14 +1435,16 @@ MomentGstModule::parseStreamsConfigSection ()
                     }
                 }
 
-                Ref<PushProtocol> const push_protocol = moment->getPushProtocolForUri (push_uri->mem());
-                if (push_protocol) {
-                    push_agent = grab (new PushAgent);
-                    push_agent->init (stream_name->mem(),
-                                      push_protocol,
-                                      push_uri      ? push_uri->mem()      : ConstMemory(),
-                                      push_username ? push_username->mem() : ConstMemory(),
-                                      push_password ? push_password->mem() : ConstMemory());
+                if (push_uri) {
+                    Ref<PushProtocol> const push_protocol = moment->getPushProtocolForUri (push_uri->mem());
+                    if (push_protocol) {
+                        push_agent = grab (new PushAgent);
+                        push_agent->init (stream_name->mem(),
+                                          push_protocol,
+                                          push_uri      ? push_uri->mem()      : ConstMemory(),
+                                          push_username ? push_username->mem() : ConstMemory(),
+                                          push_password ? push_password->mem() : ConstMemory());
+                    }
                 }
             }
 
