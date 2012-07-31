@@ -1032,9 +1032,9 @@ MomentGstModule::httpRequest (HttpRequest  * const mt_nonnull req,
 	logA_ ("gst_admin 404 ", req->getClientAddress(), " ", req->getRequestLine());
     }
 
-_return:
     return Result::Success;
 
+#if 0
 _bad_request:
     {
 	MOMENT_GST__HEADERS_DATE
@@ -1050,6 +1050,7 @@ _bad_request:
     }
 
     return Result::Success;
+#endif
 }
 
 void
@@ -1332,38 +1333,40 @@ MomentGstModule::parseStreamsConfigSection ()
 
             bool connect_on_demand = default_connect_on_demand;
             {
-                ConstMemory const opt_name = "mod_gst/connect_on_demand";
-                MConfig::Config::BooleanValue const val = config->getBoolean (opt_name);
-                if (val == MConfig::Config::Boolean_Invalid) {
-                    logE_ (_func, "Invalid value for ", opt_name, ": ", config->getString (opt_name));
-                    return Result::Failure;
-                }
+                ConstMemory const opt_name = "connect_on_demand";
+                MConfig::Option * const opt = item_section->getOption (opt_name);
+                if (opt) {
+                    MConfig::BooleanValue const val = opt->getBoolean();
+                    if (val == MConfig::Boolean_Invalid) {
+                        logE_ (_func, "Invalid value for ", opt_name, ": ", config->getString (opt_name));
+                        return Result::Failure;
+                    }
 
-                if (val == MConfig::Config::Boolean_True)
-                    connect_on_demand = true;
-                else
-                if (val == MConfig::Config::Boolean_False)
-                    connect_on_demand = false;
-                else
-                    assert (val == MConfig::Config::Boolean_Default);
+                    if (val == MConfig::Boolean_True)
+                        connect_on_demand = true;
+                    else
+                    if (val == MConfig::Boolean_False)
+                        connect_on_demand = false;
+                    else
+                        assert (val == MConfig::Boolean_Default);
+                }
             }
 
             Time connect_on_demand_timeout = default_connect_on_demand_timeout;
             {
-                ConstMemory const opt_name = "mod_gst/connect_on_demand_timeout";
-                Uint64 tmp_uint64;
-                MConfig::GetResult const res = config->getUint64_default (
-                        opt_name, &tmp_uint64, connect_on_demand_timeout);
-                if (!res) {
-                    logE_ (_func, "Invalid value for ", opt_name, ": ", config->getString (opt_name));
-                    return Result::Failure;
+                ConstMemory const opt_name = "connect_on_demand_timeout";
+                MConfig::Option * const opt = item_section->getOption (opt_name);
+                if (opt && opt->getValue()) {
+                    Uint64 tmp_uint64;
+                    if (!opt->getValue()->getAsUint64 (&tmp_uint64)) {
+                        logE_ (_func, "Bad value for \"", opt_name, "\" option: ", opt->getValue()->mem());
+                        return Result::Failure;
+                    }
+                    connect_on_demand_timeout = (Time) tmp_uint64;
                 }
-                connect_on_demand_timeout = (Time) tmp_uint64;
             }
 
             Ref<PushAgent> push_agent;
-#if 0
-// TODO
             {
                 Ref<String> push_uri;
                 {
@@ -1377,6 +1380,8 @@ MomentGstModule::parseStreamsConfigSection ()
                     }
                 }
 
+#if 0
+// TODO Unused?
                 Ref<String> push_server;
                 {
                     ConstMemory const opt_name = "push_server";
@@ -1404,6 +1409,7 @@ MomentGstModule::parseStreamsConfigSection ()
                             logD_ (_func, "Default push_port: ", push_port);
                     }
                 }
+#endif
 
                 Ref<String> push_username;
                 {
@@ -1430,15 +1436,15 @@ MomentGstModule::parseStreamsConfigSection ()
                 }
 
                 Ref<PushProtocol> const push_protocol = moment->getPushProtocolForUri (push_uri->mem());
-
-                push_agent = grab (new PushAgent);
-                push_agent->init (stream_name->mem(),
-                                  push_protocol,
-                                  push_uri->mem(),
-                                  push_username->mem(),
-                                  push_password->mem());
+                if (push_protocol) {
+                    push_agent = grab (new PushAgent);
+                    push_agent->init (stream_name->mem(),
+                                      push_protocol,
+                                      push_uri      ? push_uri->mem()      : ConstMemory(),
+                                      push_username ? push_username->mem() : ConstMemory(),
+                                      push_password ? push_password->mem() : ConstMemory());
+                }
             }
-#endif
 
 	    if (chain && !chain->isNull()) {
 		createStreamChannel (stream_name->mem(),
@@ -1566,13 +1572,13 @@ MomentGstModule::init (MomentServer * const moment)
 
     {
 	ConstMemory const opt_name = "mod_gst/send_metadata";
-	MConfig::Config::BooleanValue const val = config->getBoolean (opt_name);
-	if (val == MConfig::Config::Boolean_Invalid) {
+	MConfig::BooleanValue const val = config->getBoolean (opt_name);
+	if (val == MConfig::Boolean_Invalid) {
 	    logE_ (_func, "Invalid value for ", opt_name, ": ", config->getString (opt_name));
 	    return Result::Failure;
 	}
 
-	if (val == MConfig::Config::Boolean_True) {
+	if (val == MConfig::Boolean_True) {
 	    send_metadata = true;
 	} else {
 	    send_metadata = false;
@@ -1583,13 +1589,13 @@ MomentGstModule::init (MomentServer * const moment)
 
     {
 	ConstMemory const opt_name = "mod_gst/prechunking";
-	MConfig::Config::BooleanValue const val = config->getBoolean (opt_name);
-	if (val == MConfig::Config::Boolean_Invalid) {
+	MConfig::BooleanValue const val = config->getBoolean (opt_name);
+	if (val == MConfig::Boolean_Invalid) {
 	    logE_ (_func, "Invalid value for ", opt_name, ": ", config->getString (opt_name));
 	    return Result::Failure;
 	}
 
-	if (val == MConfig::Config::Boolean_False) {
+	if (val == MConfig::Boolean_False) {
 	    enable_prechunking = false;
 	} else {
 	    enable_prechunking = true;
@@ -1600,13 +1606,13 @@ MomentGstModule::init (MomentServer * const moment)
 
     {
 	ConstMemory const opt_name = "mod_gst/keep_video_streams";
-	MConfig::Config::BooleanValue const val = config->getBoolean (opt_name);
-	if (val == MConfig::Config::Boolean_Invalid) {
+	MConfig::BooleanValue const val = config->getBoolean (opt_name);
+	if (val == MConfig::Boolean_Invalid) {
 	    logE_ (_func, "Invalid value for ", opt_name, ": ", config->getString (opt_name));
 	    return Result::Failure;
 	}
 
-	if (val == MConfig::Config::Boolean_True) {
+	if (val == MConfig::Boolean_True) {
 	    keep_video_streams = true;
 	} else {
 	    keep_video_streams = false;
@@ -1657,13 +1663,13 @@ MomentGstModule::init (MomentServer * const moment)
 
     {
         ConstMemory const opt_name = "mod_gst/connect_on_demand";
-        MConfig::Config::BooleanValue const val = config->getBoolean (opt_name);
-        if (val == MConfig::Config::Boolean_Invalid) {
+        MConfig::BooleanValue const val = config->getBoolean (opt_name);
+        if (val == MConfig::Boolean_Invalid) {
             logE_ (_func, "Invalid value for ", opt_name, ": ", config->getString (opt_name));
             return Result::Failure;
         }
 
-        if (val == MConfig::Config::Boolean_True) {
+        if (val == MConfig::Boolean_True) {
             default_connect_on_demand = true;
         } else {
             default_connect_on_demand = false;

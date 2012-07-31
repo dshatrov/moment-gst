@@ -61,13 +61,13 @@ static void doMomentGstInit ()
 
     {
 	ConstMemory const opt_name = "mod_gst/enable";
-	MConfig::Config::BooleanValue const enable = config->getBoolean (opt_name);
-	if (enable == MConfig::Config::Boolean_Invalid) {
+	MConfig::BooleanValue const enable = config->getBoolean (opt_name);
+	if (enable == MConfig::Boolean_Invalid) {
 	    logE_ (_func, "Invalid value for ", opt_name, ": ", config->getString (opt_name));
 	    return;
 	}
 
-	if (enable == MConfig::Config::Boolean_False) {
+	if (enable == MConfig::Boolean_False) {
 	    logI_ (_func, "GStreamer module is not enabled. "
 		   "Set \"", opt_name, "\" option to \"y\" to enable.");
 	    return;
@@ -76,13 +76,13 @@ static void doMomentGstInit ()
 
     {
 	ConstMemory const opt_name = "mod_gst/gst_debug";
-	MConfig::Config::BooleanValue const gst_debug = config->getBoolean (opt_name);
-	if (gst_debug == MConfig::Config::Boolean_Invalid) {
+	MConfig::BooleanValue const gst_debug = config->getBoolean (opt_name);
+	if (gst_debug == MConfig::Boolean_Invalid) {
 	    logE_ (_func, "Invalid value for ", opt_name);
 	    return;
 	}
 
-	if (gst_debug == MConfig::Config::Boolean_True) {
+	if (gst_debug == MConfig::Boolean_True) {
 	  // Initialization with gstreamer debugging output enabled.
 
 	    int argc = 2;
