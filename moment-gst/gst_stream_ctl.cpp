@@ -408,10 +408,10 @@ GstStreamCtl::noVideo (void * const _stream_data)
 void
 GstStreamCtl::gotVideo (void * const _stream_data)
 {
-    logD_ (_func_);
-
     StreamData * const stream_data = static_cast <StreamData*> (_stream_data);
     GstStreamCtl * const self = stream_data->gst_stream_ctl;
+
+    logD_ (_func_, " 0x", fmt_hex, (UintPtr) self);
 
     self->mutex.lock ();
     if (stream_data != self->cur_stream_data ||

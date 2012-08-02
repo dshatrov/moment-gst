@@ -1375,8 +1375,6 @@ MomentGstModule::parseStreamsConfigSection ()
                     if (opt && opt->getValue()) {
                         push_uri = opt->getValue()->getAsString();
                         logD_ (_func, opt_name, ": ", push_uri);
-                    } else {
-                        push_uri = grab (new String);
                     }
                 }
 
