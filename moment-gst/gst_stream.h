@@ -116,10 +116,8 @@ private:
       VideoStream::AudioCodecId audio_codec_id;
       unsigned audio_rate;
       unsigned audio_channels;
-      Byte audio_hdr;
 
       VideoStream::VideoCodecId video_codec_id;
-      Byte video_hdr;
 
       bool got_in_stats;
       bool got_video;

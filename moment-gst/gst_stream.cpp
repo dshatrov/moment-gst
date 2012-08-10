@@ -857,7 +857,6 @@ GstStream::doAudioData (GstBuffer * const buffer)
     VideoStream::AudioFrameType codec_data_type = VideoStream::AudioFrameType::Unknown;
     GstBuffer *codec_data_buffers [2];
     Count num_codec_data_buffers = 0;
-//    GstBuffer *aac_codec_data_buffer = NULL;
     if (first_audio_frame) {
 	GstCaps * const caps = gst_buffer_get_caps (buffer);
 	{
@@ -879,8 +878,7 @@ GstStream::doAudioData (GstBuffer * const buffer)
 	if (!gst_structure_get_int (structure, "rate", &rate))
 	    rate = 44100;
 
-        audio_rate = rate;
-        audio_channels = channels;
+        logD_ (_func, "rate: ", rate, ", channels: ", channels);
 
 	if (equal (structure_name_mem, "audio/mpeg")) {
 	    gint mpegversion;
@@ -894,31 +892,9 @@ GstStream::doAudioData (GstBuffer * const buffer)
 	    if (mpegversion == 1 && layer == 3) {
 	      // MP3
 		audio_codec_id = VideoStream::AudioCodecId::MP3;
-		audio_hdr = 0x22; // MP3, _ kHz, 16-bit samples, mono
-
-		switch (rate) {
-		    case 8000:
-			audio_hdr &= 0x0f;
-			audio_hdr |= 0xe4; // MP3 8 kHz, 11 kHz
-			break;
-		    case 11025:
-			audio_hdr |= 0x4; // 11 kHz
-			break;
-		    case 22050:
-			audio_hdr |= 0x8; // 22 kHz
-			break;
-		    case 44100:
-			audio_hdr |= 0xc; // 44 kHz
-			break;
-		    default:
-			logW_ (_func, "Unsupported bitrate: ", rate);
-			audio_hdr |= 0xc; // 44 kHz
-		}
 	    } else {
 	      // AAC
 		audio_codec_id = VideoStream::AudioCodecId::AAC;
-		// TODO Correct header based on caps.
-	        audio_hdr = 0xae; // AAC, 44 kHz, 16-bit samples, mono
 
 		do {
 		  // Processing AacSequenceHeader.
@@ -934,10 +910,6 @@ GstStream::doAudioData (GstBuffer * const buffer)
 			break;
 		    }
 
-#if 0
-		    aac_codec_data_buffer = gst_value_get_buffer (val);
-		    logD (stream, _func, "aac_codec_data_buffer: 0x", fmt_hex, (UintPtr) aac_codec_data_buffer);
-#endif
 		    codec_data_type = VideoStream::AudioFrameType::AacSequenceHeader;
 		    codec_data_buffers [0] = gst_value_get_buffer (val);
 		    num_codec_data_buffers = 1;
@@ -947,7 +919,6 @@ GstStream::doAudioData (GstBuffer * const buffer)
 	if (equal (structure_name_mem, "audio/x-speex")) {
 	  // Speex
 	    audio_codec_id = VideoStream::AudioCodecId::Speex;
-	    audio_hdr = 0xb6; // Speex, 11 kHz, 16-bit samples, mono
 
 	    do {
 	      // Processing Speex stream headers.
@@ -985,33 +956,26 @@ GstStream::doAudioData (GstBuffer * const buffer)
 	if (equal (structure_name_mem, "audio/x-nellymoser")) {
 	  // Nellymoser
 	    audio_codec_id = VideoStream::AudioCodecId::Nellymoser;
-	    audio_hdr = 0x6e; // Nellymoser, 44 kHz, 16-bit samples, mono
 	} else
 	if (equal (structure_name_mem, "audio/x-adpcm")) {
 	  // ADPCM
 	    audio_codec_id = VideoStream::AudioCodecId::ADPCM;
-	    audio_hdr = 0x1e; // ADPCM, 44 kHz, 16-bit samples, mono
 	} else
 	if (equal (structure_name_mem, "audio/x-raw-int")) {
 	  // Linear PCM, little endian
 	    audio_codec_id = VideoStream::AudioCodecId::LinearPcmLittleEndian;
-	    audio_hdr = 0x3e; // Linear PCM (little endian), 44 kHz, 16-bit samples, mono
 	} else
 	if (equal (structure_name_mem, "audio/x-alaw")) {
 	  // G.711 A-law logarithmic PCM
 	    audio_codec_id = VideoStream::AudioCodecId::G711ALaw;
-	    audio_hdr = 0x7e; // G.711 A-law, 44 kHz, 16-bit samples, mono
 	} else
 	if (equal (structure_name_mem, "audio/x-mulaw")) {
 	  // G.711 mu-law logarithmic PCM
 	    audio_codec_id = VideoStream::AudioCodecId::G711MuLaw;
-	    audio_hdr = 0x8e; // G.711 mu-law, 44 kHz, 16-bit samples, mono
 	}
 
-	if (channels > 1) {
-	    logD (stream, _func, "stereo");
-	    audio_hdr |= 1; // stereo
-	}
+        audio_rate = rate;
+        audio_channels = channels;
 
 	metadata.audio_sample_rate = (Uint32) rate;
 	metadata.got_flags |= RtmpServer::MetaData::AudioSampleRate;
@@ -1059,9 +1023,9 @@ GstStream::doAudioData (GstBuffer * const buffer)
     }
 
     VideoStream::AudioCodecId const tmp_audio_codec_id = audio_codec_id;
-    Byte const tmp_audio_hdr = audio_hdr;
     unsigned const tmp_audio_rate = audio_rate;
     unsigned const tmp_audio_channels = audio_channels;
+//    logD_ (_func, "rate: ", audio_rate, ", channels: ", audio_channels);
     mutex.unlock ();
 
     if (GST_BUFFER_FLAG_IS_SET (buffer, GST_BUFFER_FLAG_IN_CAPS) ||
@@ -1084,35 +1048,21 @@ GstStream::doAudioData (GstBuffer * const buffer)
 //	    Uint64 const cd_timestamp = (Uint64) (GST_BUFFER_TIMESTAMP (codec_data_buffers [i]) / 1000000);
 	    Uint64 const cd_timestamp = 0;
 
-	    PagePool::PageListHead page_list;
-	    RtmpConnection::PrechunkContext prechunk_ctx;
-
-	    Byte msg_audio_hdr [2] = { tmp_audio_hdr, 0 };
-	    Size msg_audio_hdr_len = 1;
-	    if (codec_data_type == VideoStream::AudioFrameType::AacSequenceHeader)
-		msg_audio_hdr_len = 2;
-
-            if (enable_prechunking) {
-                RtmpConnection::fillPrechunkedPages (&prechunk_ctx,
-                                                     ConstMemory (msg_audio_hdr, msg_audio_hdr_len),
-                                                     page_pool,
-                                                     &page_list,
-                                                     RtmpConnection::DefaultAudioChunkStreamId,
-                                                     cd_timestamp,
-                                                     true /* first_chunk */);
-            } else {
-                page_pool->getFillPages (&page_list, ConstMemory (msg_audio_hdr, msg_audio_hdr_len));
-            }
-	    msg_len += msg_audio_hdr_len;
-
-	    logD (frames, _func, "CODEC DATA");
 	    if (logLevelOn (frames, LogLevel::D)) {
                 logLock ();
+                logD_unlocked_ (_func, "CODEC DATA");
 		hexdump (logs, ConstMemory (GST_BUFFER_DATA (codec_data_buffers [i]), GST_BUFFER_SIZE (codec_data_buffers [i])));
                 logUnlock ();
             }
 
+            PagePool::PageListHead page_list;
+
             if (enable_prechunking) {
+                Size msg_audio_hdr_len = 1;
+                if (codec_data_type == VideoStream::AudioFrameType::AacSequenceHeader)
+                    msg_audio_hdr_len = 2;
+
+                RtmpConnection::PrechunkContext prechunk_ctx (msg_audio_hdr_len /* initial_offset */);
                 RtmpConnection::fillPrechunkedPages (&prechunk_ctx,
                                                      ConstMemory (GST_BUFFER_DATA (codec_data_buffers [i]),
                                                                   GST_BUFFER_SIZE (codec_data_buffers [i])),
@@ -1157,31 +1107,14 @@ GstStream::doAudioData (GstBuffer * const buffer)
 //    logD_ (_func, "timestamp: 0x", fmt_hex, timestamp, ", size: ", fmt_def, GST_BUFFER_SIZE (buffer));
 //    logD_ (_func, "tmp_audio_codec_id: ", tmp_audio_codec_id);
 
-    Byte gen_audio_hdr [2];
-    Size gen_audio_hdr_len = 1;
-    gen_audio_hdr [0] = tmp_audio_hdr;
-    if (tmp_audio_codec_id == VideoStream::AudioCodecId::AAC) {
-	gen_audio_hdr [1] = 1;
-	gen_audio_hdr_len = 2;
-    }
-
     PagePool::PageListHead page_list;
-    RtmpConnection::PrechunkContext prechunk_ctx;
 
     if (enable_prechunking) {
-        RtmpConnection::fillPrechunkedPages (&prechunk_ctx,
-                                             ConstMemory (gen_audio_hdr, gen_audio_hdr_len),
-                                             page_pool,
-                                             &page_list,
-                                             RtmpConnection::DefaultAudioChunkStreamId,
-                                             timestamp,
-                                             true /* first_chunk */);
-    } else {
-        page_pool->getFillPages (&page_list, ConstMemory (gen_audio_hdr, gen_audio_hdr_len));
-    }
-    msg_len += gen_audio_hdr_len;
+        Size gen_audio_hdr_len = 1;
+        if (tmp_audio_codec_id == VideoStream::AudioCodecId::AAC)
+            gen_audio_hdr_len = 2;
 
-    if (enable_prechunking) {
+        RtmpConnection::PrechunkContext prechunk_ctx (gen_audio_hdr_len /* initial_offset */);
         RtmpConnection::fillPrechunkedPages (&prechunk_ctx,
                                              ConstMemory (GST_BUFFER_DATA (buffer), GST_BUFFER_SIZE (buffer)),
                                              page_pool,
@@ -1314,11 +1247,9 @@ GstStream::doVideoData (GstBuffer * const buffer)
 
 	if (equal (st_name_mem, "video/x-flash-video")) {
 	   video_codec_id = VideoStream::VideoCodecId::SorensonH263;
-	   video_hdr = 0x02; // Sorenson H.263
 	} else
 	if (equal (st_name_mem, "video/x-h264")) {
 	   video_codec_id = VideoStream::VideoCodecId::AVC;
-	   video_hdr = 0x07; // AVC
 
 	   do {
 	     // Processing AvcSequenceHeader
@@ -1340,11 +1271,9 @@ GstStream::doVideoData (GstBuffer * const buffer)
 	} else
 	if (equal (st_name_mem, "video/x-vp6")) {
 	   video_codec_id = VideoStream::VideoCodecId::VP6;
-	   video_hdr = 0x04; // On2 VP6
 	} else
 	if (equal (st_name_mem, "video/x-flash-screen")) {
 	   video_codec_id = VideoStream::VideoCodecId::ScreenVideo;
-	   video_hdr = 0x03; // Screen video
 	}
 
 	if (send_metadata) {
@@ -1378,7 +1307,6 @@ GstStream::doVideoData (GstBuffer * const buffer)
     }
 
     VideoStream::VideoCodecId const tmp_video_codec_id = video_codec_id;
-    Byte const tmp_video_hdr = video_hdr;
     mutex.unlock ();
 
     if (GST_BUFFER_FLAG_IS_SET (buffer, GST_BUFFER_FLAG_IN_CAPS) ||
@@ -1396,29 +1324,7 @@ GstStream::doVideoData (GstBuffer * const buffer)
 
 	Size msg_len = 0;
 
-	PagePool::PageListHead page_list;
-	RtmpConnection::PrechunkContext prechunk_ctx;
-
-	Byte avc_video_hdr [5] = { 0x17, 0, 0, 0, 0 }; // AVC, seekable frame;
-						       // AVC sequence header;
-						       // Composition time offset = 0.
-
-        if (enable_prechunking) {
-            RtmpConnection::fillPrechunkedPages (&prechunk_ctx,
-                                                 ConstMemory::forObject (avc_video_hdr),
-                                                 page_pool,
-                                                 &page_list,
-                                                 RtmpConnection::DefaultVideoChunkStreamId,
-                                                 timestamp,
-                                                 true /* first_chunk */);
-            msg_len += sizeof (avc_video_hdr);
-        } else {
-// TODO FIXME This should be done in mod_rtmp
-// TEST (uncomment)            page_pool->getFillPages (&page_list, ConstMemory::forObject (avc_video_hdr));
-//            msg_len += sizeof (avc_video_hdr);
-        }
-
-	logD (frames,_func, "AVC SEQUENCE HEADER");
+	logD (frames, _func, "AVC SEQUENCE HEADER");
 	if (logLevelOn (frames, LogLevel::D)) {
             logLock ();
 	    hexdump (logs, ConstMemory (GST_BUFFER_DATA (avc_codec_data_buffer), GST_BUFFER_SIZE (avc_codec_data_buffer)));
@@ -1435,7 +1341,10 @@ GstStream::doVideoData (GstBuffer * const buffer)
 	}
 #endif
 
+        PagePool::PageListHead page_list;
+
         if (enable_prechunking) {
+            RtmpConnection::PrechunkContext prechunk_ctx (5 /* initial_offset: FLV AVC header length */);
             RtmpConnection::fillPrechunkedPages (&prechunk_ctx,
                                                  ConstMemory (GST_BUFFER_DATA (avc_codec_data_buffer),
                                                               GST_BUFFER_SIZE (avc_codec_data_buffer)),
@@ -1489,22 +1398,10 @@ GstStream::doVideoData (GstBuffer * const buffer)
     msg.frame_type = VideoStream::VideoFrameType::InterFrame;
     msg.codec_id = tmp_video_codec_id;
 
-    Byte gen_video_hdr [5];
-    Size gen_video_hdr_len = 1;
-    gen_video_hdr [0] = tmp_video_hdr;
-    if (tmp_video_codec_id == VideoStream::VideoCodecId::AVC) {
-	gen_video_hdr [1] = 1; // AVC NALU
-
-	// Composition time offset
-	gen_video_hdr [2] = 0;
-	gen_video_hdr [3] = 0;
-	gen_video_hdr [4] = 0;
-
-	gen_video_hdr_len = 5;
-    }
-
     bool is_keyframe = false;
 #if 0
+  // This is deprecated, kept here for reference.
+
     // Keyframe detection by parsing message body for Sorenson H.263
     // See ffmpeg:h263.c for reference.
     if (tmp_video_codec_id == VideoStream::VideoCodecId::SorensonH263) {
@@ -1536,32 +1433,19 @@ GstStream::doVideoData (GstBuffer * const buffer)
 
     if (is_keyframe) {
 	msg.frame_type = VideoStream::VideoFrameType::KeyFrame;
-	gen_video_hdr [0] |= 0x10;
     } else {
       // TODO We do not make difference between inter frames and
       // disposable inter frames for Sorenson h.263 here.
-	gen_video_hdr [0] |= 0x20;
     }
 
     PagePool::PageListHead page_list;
-    RtmpConnection::PrechunkContext prechunk_ctx;
 
     if (enable_prechunking) {
-        RtmpConnection::fillPrechunkedPages (&prechunk_ctx,
-                                             ConstMemory (gen_video_hdr, gen_video_hdr_len),
-                                             page_pool,
-                                             &page_list,
-                                             RtmpConnection::DefaultVideoChunkStreamId,
-                                             timestamp,
-                                             true /* first_chunk */);
-        msg_len += gen_video_hdr_len;
-    } else {
-// TEST (uncomment)
-//        page_pool->getFillPages (&page_list, ConstMemory (gen_video_hdr, gen_video_hdr_len));
-//        msg_len += gen_video_hdr_len;
-    }
+        Size gen_video_hdr_len = 1;
+        if (tmp_video_codec_id == VideoStream::VideoCodecId::AVC)
+            gen_video_hdr_len = 5;
 
-    if (enable_prechunking) {
+        RtmpConnection::PrechunkContext prechunk_ctx (gen_video_hdr_len /* initial_offset */);
         RtmpConnection::fillPrechunkedPages (&prechunk_ctx,
                                              ConstMemory (GST_BUFFER_DATA (buffer), GST_BUFFER_SIZE (buffer)),
                                              page_pool,
@@ -2198,10 +2082,8 @@ GstStream::GstStream ()
       audio_codec_id (VideoStream::AudioCodecId::Unknown),
       audio_rate (44100),
       audio_channels (1),
-      audio_hdr (0xbe /* Speex */),
 
       video_codec_id (VideoStream::VideoCodecId::Unknown),
-      video_hdr (0x02 /* Sorenson H.263 */),
 
       got_in_stats (false),
       got_video (false),
