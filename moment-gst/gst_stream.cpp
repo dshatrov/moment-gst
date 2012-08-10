@@ -879,6 +879,9 @@ GstStream::doAudioData (GstBuffer * const buffer)
 	if (!gst_structure_get_int (structure, "rate", &rate))
 	    rate = 44100;
 
+        audio_rate = rate;
+        audio_channels = channels;
+
 	if (equal (structure_name_mem, "audio/mpeg")) {
 	    gint mpegversion;
 	    gint layer;
@@ -1057,6 +1060,8 @@ GstStream::doAudioData (GstBuffer * const buffer)
 
     VideoStream::AudioCodecId const tmp_audio_codec_id = audio_codec_id;
     Byte const tmp_audio_hdr = audio_hdr;
+    unsigned const tmp_audio_rate = audio_rate;
+    unsigned const tmp_audio_channels = audio_channels;
     mutex.unlock ();
 
     if (GST_BUFFER_FLAG_IS_SET (buffer, GST_BUFFER_FLAG_IN_CAPS) ||
@@ -1128,6 +1133,8 @@ GstStream::doAudioData (GstBuffer * const buffer)
 	    msg.prechunk_size = (enable_prechunking ? RtmpConnection::PrechunkSize : 0);
 	    msg.frame_type = codec_data_type;
 	    msg.codec_id = tmp_audio_codec_id;
+            msg.rate = tmp_audio_rate;
+            msg.channels = tmp_audio_channels;
 
 	    msg.page_pool = page_pool;
 	    msg.page_list = page_list;
@@ -1199,6 +1206,8 @@ GstStream::doAudioData (GstBuffer * const buffer)
     msg.page_list = page_list;
     msg.msg_len = msg_len;
     msg.msg_offset = 0;
+    msg.rate = tmp_audio_rate;
+    msg.channels = tmp_audio_channels;
 
 //    logD_ (_func, fmt_hex, msg.timestamp);
 
@@ -1311,7 +1320,6 @@ GstStream::doVideoData (GstBuffer * const buffer)
 	   video_codec_id = VideoStream::VideoCodecId::AVC;
 	   video_hdr = 0x07; // AVC
 
-	   bool got_codec_data = false;
 	   do {
 	     // Processing AvcSequenceHeader
 
@@ -1328,14 +1336,7 @@ GstStream::doVideoData (GstBuffer * const buffer)
 
 	       avc_codec_data_buffer = gst_value_get_buffer (val);
 	       logD (frames, _func, "avc_codec_data_buffer: 0x", fmt_hex, (UintPtr) avc_codec_data_buffer);
-	       got_codec_data = true;
 	   } while (0);
-
-#if 0
-	   if (!got_codec_data && GST_BUFFER_TIMESTAMP (buffer) == -1) {
-	       avc_codec_data_buffer = buffer;
-	   }
-#endif
 	} else
 	if (equal (st_name_mem, "video/x-vp6")) {
 	   video_codec_id = VideoStream::VideoCodecId::VP6;
@@ -1392,30 +1393,6 @@ GstStream::doVideoData (GstBuffer * const buffer)
         // Timestamps for codec data buffers are seemingly random.
 //	Uint64 const timestamp = (Uint64) (GST_BUFFER_TIMESTAMP (avc_codec_data_buffer) / 1000000);
         Uint64 const timestamp = 0;
-
-        {
-            VideoStream::VideoMessage msg;
-
-            msg.timestamp = timestamp;
-            msg.codec_id = VideoStream::VideoCodecId::AVC;
-            msg.frame_type = VideoStream::VideoFrameType::AvcEndOfSequence;
-
-            msg.page_pool = page_pool;
-            msg.prechunk_size = 0;
-            msg.msg_offset = 0;
-
-          // TODO Send AvcEndOfSequence only when AvcSequenceHeader was sent.
-            Byte avc_video_hdr [5] = { 0x17, 2, 0, 0, 0 }; // AVC, seekable frame;
-                                                           // AVC end of sequence;
-                                                           // Composition time offset = 0.
-
-            // TODO FIXME This should be done in mod_rtmp.
-            msg.page_pool->getFillPages (&msg.page_list, ConstMemory::forObject (avc_video_hdr));
-
-            msg.msg_len = sizeof (avc_video_hdr);
-
-            video_stream->fireVideoMessage (&msg);
-        }
 
 	Size msg_len = 0;
 
@@ -1484,6 +1461,13 @@ GstStream::doVideoData (GstBuffer * const buffer)
 	msg.page_list = page_list;
 	msg.msg_len = msg_len;
 	msg.msg_offset = 0;
+
+        if (logLevelOn (frames, LogLevel::D)) {
+            logD_ (_func, "Firing video message (AVC sequence header):");
+            logLock ();
+            PagePool::dumpPages (logs, &page_list);
+            logUnlock ();
+        }
 
         // TODO unlock/lock?
 	video_stream->fireVideoMessage (&msg);
@@ -1599,6 +1583,13 @@ GstStream::doVideoData (GstBuffer * const buffer)
     msg.page_list = page_list;
     msg.msg_len = msg_len;
     msg.msg_offset = 0;
+
+    if (logLevelOn (frames, LogLevel::D)) {
+        logD_ (_func, "Firing video message:");
+        logLock ();
+        PagePool::dumpPages (logs, &page_list);
+        logUnlock ();
+    }
 
 //    logD_ (_func, "firing video message, ", msg_len, " bytes");
     // TODO unlock/lock?
@@ -1808,7 +1799,7 @@ VideoStream::EventHandler GstStream::mix_stream_handler = {
 };
 
 void
-GstStream::mixStreamAudioMessage (VideoStream::AudioMessage * const mt_nonnull audio_msg,
+GstStream::mixStreamAudioMessage (VideoStream::AudioMessage * const mt_nonnull /* audio_msg */,
 				  void * const _self)
 {
     GstStream * const self = static_cast <GstStream*> (_self);
@@ -2167,8 +2158,9 @@ GstStream::init (ConstMemory   const stream_name,
 }
 
 GstStream::GstStream ()
-    : timers (NULL),
-      page_pool (NULL),
+    : timers    (this /* coderef_container */),
+      page_pool (this /* coderef_container */),
+
       video_stream (NULL),
       mix_video_stream (NULL),
 
@@ -2180,8 +2172,8 @@ GstStream::GstStream ()
       send_metadata (false),
       enable_prechunking (false),
 
-      default_width (0),
-      default_height (0),
+      default_width   (0),
+      default_height  (0),
       default_bitrate (0),
 
       no_video_timeout (30),
@@ -2204,6 +2196,8 @@ GstStream::GstStream ()
       last_frame_time (0),
 
       audio_codec_id (VideoStream::AudioCodecId::Unknown),
+      audio_rate (44100),
+      audio_channels (1),
       audio_hdr (0xbe /* Speex */),
 
       video_codec_id (VideoStream::VideoCodecId::Unknown),

@@ -65,8 +65,9 @@ private:
     // For log lines.
     mt_const Ref<String> stream_name;
 
-    mt_const Timers *timers;
-    mt_const PagePool *page_pool;
+    mt_const DataDepRef<Timers> timers;
+    mt_const DataDepRef<PagePool> page_pool;
+
     mt_const Ref<VideoStream> video_stream;
     mt_const Ref<VideoStream> mix_video_stream;
 
@@ -113,6 +114,8 @@ private:
       Time last_frame_time;
 
       VideoStream::AudioCodecId audio_codec_id;
+      unsigned audio_rate;
+      unsigned audio_channels;
       Byte audio_hdr;
 
       VideoStream::VideoCodecId video_codec_id;
