@@ -130,7 +130,8 @@ Channel::informStartItem (ChannelEvents * const events,
 			  void          * const cb_data,
 			  void          * const /* inform_data */)
 {
-    events->startItem (cb_data);
+    if (events->startItem)
+        events->startItem (cb_data);
 }
 
 void
@@ -138,7 +139,8 @@ Channel::informStopItem (ChannelEvents * const events,
 			 void          * const cb_data,
 			 void          * const /* inform_data */)
 {
-    events->stopItem (cb_data);
+    if (events->stopItem)
+        events->stopItem (cb_data);
 }
 
 void
@@ -146,7 +148,8 @@ Channel::informNewVideoStream (ChannelEvents * const events,
 			       void          * const cb_data,
 			       void          * const /* inform_data */)
 {
-    events->newVideoStream (cb_data);
+    if (events->newVideoStream)
+        events->newVideoStream (cb_data);
 }
 
 void
