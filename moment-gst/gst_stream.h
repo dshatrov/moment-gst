@@ -105,6 +105,7 @@ private:
 
       Time initial_seek;
       bool initial_seek_pending;
+      bool initial_seek_complete;
       bool initial_play_pending;
 
       RtmpServer::MetaData metadata;

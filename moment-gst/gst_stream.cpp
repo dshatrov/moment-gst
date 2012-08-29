@@ -849,8 +849,8 @@ GstStream::doAudioData (GstBuffer * const buffer)
     logD (frames, _func, "last_frame_time: 0x", fmt_hex, last_frame_time);
 
     if (prv_audio_timestamp > GST_BUFFER_TIMESTAMP (buffer)) {
-	logW (frames, _func, "backwards timestamp: prv 0x", fmt_hex, prv_audio_timestamp,
-	      ", cur 0x", fmt_hex, GST_BUFFER_TIMESTAMP (buffer)); 
+	logW_ (_func, "backwards timestamp: prv 0x", fmt_hex, prv_audio_timestamp,
+	       ", cur 0x", fmt_hex, GST_BUFFER_TIMESTAMP (buffer)); 
     }
     prv_audio_timestamp = GST_BUFFER_TIMESTAMP (buffer);
 
@@ -1015,7 +1015,8 @@ GstStream::doAudioData (GstBuffer * const buffer)
 	}
 
 //	if (initial_play_pending && !play_pending) {
-	if (initial_seek_pending && initial_seek > 0) {
+//	if (initial_seek_pending && initial_seek > 0) {
+        if (!initial_seek_complete) {
 	    // We have not started playing yet. This is most likely a preroll frame.
 	    logD (frames, _func, "Skipping an early preroll frame");
 	    skip_frame = true;
@@ -1045,8 +1046,8 @@ GstStream::doAudioData (GstBuffer * const buffer)
 	for (Size i = 0; i < num_codec_data_buffers; ++i) {
 	    Size msg_len = 0;
 
-//	    Uint64 const cd_timestamp = (Uint64) (GST_BUFFER_TIMESTAMP (codec_data_buffers [i]) / 1000000);
-	    Uint64 const cd_timestamp = 0;
+//	    Uint64 const cd_timestamp_nanosec = (Uint64) (GST_BUFFER_TIMESTAMP (codec_data_buffers [i]));
+	    Uint64 const cd_timestamp_nanosec = 0;
 
 	    if (logLevelOn (frames, LogLevel::D)) {
                 logLock ();
@@ -1069,7 +1070,7 @@ GstStream::doAudioData (GstBuffer * const buffer)
                                                      page_pool,
                                                      &page_list,
                                                      RtmpConnection::DefaultAudioChunkStreamId,
-                                                     cd_timestamp,
+                                                     cd_timestamp_nanosec,
                                                      false /* first_chunk */);
             } else {
                 page_pool->getFillPages (&page_list,
@@ -1079,7 +1080,7 @@ GstStream::doAudioData (GstBuffer * const buffer)
 	    msg_len += GST_BUFFER_SIZE (codec_data_buffers [i]);
 
 	    VideoStream::AudioMessage msg;
-	    msg.timestamp = cd_timestamp;
+	    msg.timestamp_nanosec = cd_timestamp_nanosec;
 	    msg.prechunk_size = (enable_prechunking ? RtmpConnection::PrechunkSize : 0);
 	    msg.frame_type = codec_data_type;
 	    msg.codec_id = tmp_audio_codec_id;
@@ -1103,8 +1104,8 @@ GstStream::doAudioData (GstBuffer * const buffer)
 
     Size msg_len = 0;
 
-    Uint64 const timestamp = (Uint64) (GST_BUFFER_TIMESTAMP (buffer) / 1000000);
-//    logD_ (_func, "timestamp: 0x", fmt_hex, timestamp, ", size: ", fmt_def, GST_BUFFER_SIZE (buffer));
+    Uint64 const timestamp_nanosec = (Uint64) (GST_BUFFER_TIMESTAMP (buffer));
+//    logD_ (_func, "timestamp: 0x", fmt_hex, timestamp_nanosec, ", size: ", fmt_def, GST_BUFFER_SIZE (buffer));
 //    logD_ (_func, "tmp_audio_codec_id: ", tmp_audio_codec_id);
 
     PagePool::PageListHead page_list;
@@ -1120,7 +1121,7 @@ GstStream::doAudioData (GstBuffer * const buffer)
                                              page_pool,
                                              &page_list,
                                              RtmpConnection::DefaultAudioChunkStreamId,
-                                             timestamp,
+                                             timestamp_nanosec / 1000000,
                                              false /* first_chunk */);
     } else {
         page_pool->getFillPages (&page_list, ConstMemory (GST_BUFFER_DATA (buffer), GST_BUFFER_SIZE (buffer)));
@@ -1130,7 +1131,7 @@ GstStream::doAudioData (GstBuffer * const buffer)
 //    hexdump (errs, ConstMemory (GST_BUFFER_DATA (buffer), GST_BUFFER_SIZE (buffer)));
 
     VideoStream::AudioMessage msg;
-    msg.timestamp = timestamp;
+    msg.timestamp_nanosec = timestamp_nanosec;
     msg.prechunk_size = (enable_prechunking ? RtmpConnection::PrechunkSize : 0);
     msg.frame_type = VideoStream::AudioFrameType::RawData;
     msg.codec_id = tmp_audio_codec_id;
@@ -1142,7 +1143,7 @@ GstStream::doAudioData (GstBuffer * const buffer)
     msg.rate = tmp_audio_rate;
     msg.channels = tmp_audio_channels;
 
-//    logD_ (_func, fmt_hex, msg.timestamp);
+//    logD_ (_func, fmt_hex, msg.timestamp_nanosec);
 
     // TODO unlock/lock?
     video_stream->fireAudioMessage (&msg);
@@ -1177,7 +1178,8 @@ GstStream::doVideoData (GstBuffer * const buffer)
     updateTime ();
 
     logD (frames, _func, "stream 0x", fmt_hex, (UintPtr) this, ", "
-	  "timestamp 0x", fmt_hex, GST_BUFFER_TIMESTAMP (buffer), ", "
+	  "timestamp 0x", fmt_hex, GST_BUFFER_TIMESTAMP (buffer),
+          " (", fmt_def, GST_BUFFER_TIMESTAMP (buffer), "), "
 	  "flags 0x", fmt_hex, GST_BUFFER_FLAGS (buffer));
     if (logLevelOn (frames, LogLevel::Debug))
 	dumpBufferFlags (buffer);
@@ -1294,12 +1296,13 @@ GstStream::doVideoData (GstBuffer * const buffer)
     {
 	if (video_skip_counter > 0) {
 	    --video_skip_counter;
-	    logD (frames, _func, "Skipping video frame, video_skip_counter: ", video_skip_counter);
+	    logD (frames, _func, "Skipping frame, video_skip_counter: ", video_skip_counter);
 	    skip_frame = true;
 	}
 
 //	if (initial_play_pending && !play_pending) {
-	if (initial_seek_pending && initial_seek > 0) {
+//	if (initial_seek_pending && initial_seek > 0) {
+        if (!initial_seek_complete) {
 	    // We have not started playing yet. This is most likely a preroll frame.
 	    logD (frames, _func, "Skipping an early preroll frame");
 	    skip_frame = true;
@@ -1312,6 +1315,7 @@ GstStream::doVideoData (GstBuffer * const buffer)
     if (GST_BUFFER_FLAG_IS_SET (buffer, GST_BUFFER_FLAG_IN_CAPS) ||
 	GST_BUFFER_TIMESTAMP (buffer) == (GstClockTime) -1)
     {
+        logD (frames, _func, "Skipping frame by in_caps/timestamp: ", GST_BUFFER_TIMESTAMP (buffer));
 	skip_frame = true;
     }
 
@@ -1319,8 +1323,8 @@ GstStream::doVideoData (GstBuffer * const buffer)
       // Reporting AVC codec data if needed.
 
         // Timestamps for codec data buffers are seemingly random.
-//	Uint64 const timestamp = (Uint64) (GST_BUFFER_TIMESTAMP (avc_codec_data_buffer) / 1000000);
-        Uint64 const timestamp = 0;
+//	Uint64 const timestamp_nanosec = (Uint64) (GST_BUFFER_TIMESTAMP (avc_codec_data_buffer));
+        Uint64 const timestamp_nanosec = 0;
 
 	Size msg_len = 0;
 
@@ -1351,7 +1355,7 @@ GstStream::doVideoData (GstBuffer * const buffer)
                                                  page_pool,
                                                  &page_list,
                                                  RtmpConnection::DefaultVideoChunkStreamId,
-                                                 timestamp,
+                                                 timestamp_nanosec / 1000000,
                                                  false /* first_chunk */);
         } else {
             page_pool->getFillPages (&page_list,
@@ -1361,7 +1365,7 @@ GstStream::doVideoData (GstBuffer * const buffer)
 	msg_len += GST_BUFFER_SIZE (avc_codec_data_buffer);
 
 	VideoStream::VideoMessage msg;
-	msg.timestamp = timestamp;
+	msg.timestamp_nanosec = timestamp_nanosec;
 	msg.prechunk_size = (enable_prechunking ? RtmpConnection::PrechunkSize : 0);
 	msg.frame_type = VideoStream::VideoFrameType::AvcSequenceHeader;
 	msg.codec_id = tmp_video_codec_id;
@@ -1385,14 +1389,14 @@ GstStream::doVideoData (GstBuffer * const buffer)
     } // if (avc_codec_data_buffer)
 
     if (skip_frame) {
-	logD (frames, "skipping frame");
+	logD (frames, _func, "skipping frame");
 	return;
     }
 
     Size msg_len = 0;
 
-    Uint64 const timestamp = (Uint64) (GST_BUFFER_TIMESTAMP (buffer) / 1000000);
-//    logD_ (_func, "timestamp: 0x", fmt_hex, timestamp);
+    Uint64 const timestamp_nanosec = (Uint64) (GST_BUFFER_TIMESTAMP (buffer));
+//    logD_ (_func, "timestamp: 0x", fmt_hex, timestamp_nanosec);
 
     VideoStream::VideoMessage msg;
     msg.frame_type = VideoStream::VideoFrameType::InterFrame;
@@ -1451,7 +1455,7 @@ GstStream::doVideoData (GstBuffer * const buffer)
                                              page_pool,
                                              &page_list,
                                              RtmpConnection::DefaultVideoChunkStreamId,
-                                             timestamp,
+                                             timestamp_nanosec / 1000000,
                                              false /* first_chunk */);
     } else {
         page_pool->getFillPages (&page_list, ConstMemory (GST_BUFFER_DATA (buffer), GST_BUFFER_SIZE (buffer)));
@@ -1460,7 +1464,7 @@ GstStream::doVideoData (GstBuffer * const buffer)
 
 //    hexdump (errs, ConstMemory (GST_BUFFER_DATA (buffer), GST_BUFFER_SIZE (buffer)));
 
-    msg.timestamp = timestamp;
+    msg.timestamp_nanosec = timestamp_nanosec;
     msg.prechunk_size = (enable_prechunking ? RtmpConnection::PrechunkSize : 0);
 
     msg.page_pool = page_pool;
@@ -1538,16 +1542,19 @@ GstStream::busSyncHandler (GstBus     * const /* bus */,
 #endif
 
 			if (self->initial_seek_pending) {
-			    self->initial_seek_pending = false;
+                            logD_ (_func, "setting 'initial_seek_pending' to 'false'");
+                            self->initial_seek_pending = false;
 			    if (self->initial_seek > 0) {
 				self->seek_pending = true;
 			    } else {
+                                self->initial_seek_complete = true;
 				if (self->initial_play_pending) {
 				    self->initial_play_pending = false;
 				    self->play_pending = true;
 				}
 			    }
 			} else {
+                            self->initial_seek_complete = true;
 			    if (self->initial_play_pending) {
 				self->initial_play_pending = false;
 				self->play_pending = true;
@@ -1755,7 +1762,7 @@ GstStream::mixStreamVideoMessage (VideoStream::VideoMessage * const mt_nonnull v
     }
 
     gst_buffer_set_caps (buffer, self->mix_video_caps);
-    GST_BUFFER_TIMESTAMP (buffer) = (Uint64) video_msg->timestamp * 1000000;
+    GST_BUFFER_TIMESTAMP (buffer) = (Uint64) video_msg->timestamp_nanosec;
     GST_BUFFER_SIZE (buffer) = video_msg->msg_len;
     GST_BUFFER_DURATION (buffer) = 0;
 
@@ -2006,6 +2013,8 @@ GstStream::init (ConstMemory   const stream_name,
     this->no_video_timeout = no_video_timeout;
 
     this->initial_seek = initial_seek;
+    if (initial_seek == 0)
+        initial_seek_complete = true;
 
     {
         workqueue_thread =
@@ -2072,8 +2081,9 @@ GstStream::GstStream ()
       mix_video_src (NULL),
 
       initial_seek (0),
-      initial_seek_pending (true),
-      initial_play_pending (true),
+      initial_seek_pending  (true),
+      initial_seek_complete (false),
+      initial_play_pending  (true),
 
       metadata_reported (false),
 
