@@ -25,6 +25,18 @@ using namespace Moment;
 
 namespace MomentGst {
 
+void
+GstStreamCtl::setStreamParameters (VideoStream * const mt_nonnull video_stream)
+{
+    Ref<StreamParameters> const stream_params = grab (new StreamParameters);
+    if (no_audio)
+        stream_params->setParam ("no_audio", "true");
+    if (no_video)
+        stream_params->setParam ("no_video", "true");
+
+    video_stream->setStreamParameters (stream_params);
+}
+
 VideoStream::EventHandler const GstStreamCtl::stream_event_handler = {
     NULL /* audioMessage */,
     NULL /* videoMessage */,
@@ -166,6 +178,8 @@ GstStreamCtl::createStream (Time const initial_seek)
 
     if (!video_stream) {
 	video_stream = grab (new VideoStream);
+        setStreamParameters (video_stream);
+
 	logD_ (_func, "Calling moment->addVideoStream, stream_name: ", stream_name->mem());
 	video_stream_key = moment->addVideoStream (video_stream, stream_name->mem());
     }
@@ -272,6 +286,8 @@ GstStreamCtl::closeStream (bool const replace_video_stream)
             }
 
 	    video_stream = grab (new VideoStream);
+            setStreamParameters (video_stream);
+
 	    logD_ (_func, "Calling moment->addVideoStream, stream_name: ", stream_name->mem());
 	    video_stream_key = moment->addVideoStream (video_stream, stream_name->mem());
 
@@ -530,6 +546,8 @@ mt_const void
 GstStreamCtl::init (MomentServer      * const moment,
 		    DeferredProcessor * const deferred_processor,
 		    ConstMemory         const stream_name,
+                    bool                const no_audio,
+                    bool                const no_video,
 		    bool                const send_metadata,
                     bool                const enable_prechunking,
 		    bool                const keep_video_stream,
@@ -546,6 +564,8 @@ GstStreamCtl::init (MomentServer      * const moment,
 
     this->stream_name = grab (new String (stream_name));
 
+    this->no_audio = no_audio;
+    this->no_video = no_video;
     this->send_metadata = send_metadata;
     this->enable_prechunking = enable_prechunking;
     this->keep_video_stream = keep_video_stream;

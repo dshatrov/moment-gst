@@ -75,6 +75,8 @@ private:
 
   // Defaults
 
+    mt_const bool no_audio;
+    mt_const bool no_video;
     mt_const bool send_metadata;
     mt_const bool enable_prechunking;
     mt_const bool keep_video_stream;
@@ -146,6 +148,8 @@ private:
 
     mt_const Cb<Frontend> frontend;
 
+    void setStreamParameters (VideoStream * mt_nonnull video_stream);
+
     mt_iface (VideoStream::EventHandler)
 
         static VideoStream::EventHandler const stream_event_handler;
@@ -215,6 +219,8 @@ public:
     mt_const void init (MomentServer      *moment,
 			DeferredProcessor *deferred_processor,
 			ConstMemory        stream_name,
+                        bool               no_audio,
+                        bool               no_video,
 			bool               send_metadata,
                         bool               enable_prechunking,
 			bool               keep_video_stream,

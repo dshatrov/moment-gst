@@ -162,6 +162,8 @@ public:
 
     mt_const void init (MomentServer *moment,
 			ConstMemory   channel_name,
+                        bool          no_audio,
+                        bool          no_video,
 			bool          send_metadata,
                         bool          enable_prechunking,
 			bool          keep_video_stream,

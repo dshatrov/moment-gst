@@ -69,6 +69,7 @@ using namespace Moment;
 namespace MomentGst {
 
 static Ref<String> this_rtmpt_server_addr;
+static Ref<String> this_hls_server_addr;
 
 Result
 MomentGstModule::updatePlaylist (ConstMemory   const channel_name,
@@ -161,6 +162,8 @@ void
 MomentGstModule::createPlaylistChannel (ConstMemory   const channel_name,
 					ConstMemory   const channel_desc,
 					ConstMemory   const playlist_filename,
+                                        bool          const no_audio,
+                                        bool          const no_video,
 					bool          const recording,
 					ConstMemory   const record_filename,
                                         bool          const connect_on_demand,
@@ -180,6 +183,8 @@ MomentGstModule::createPlaylistChannel (ConstMemory   const channel_name,
 
     channel->init (moment,
 		   channel_name,
+                   no_audio,
+                   no_video,
 		   send_metadata,
                    enable_prechunking,
 		   keep_video_streams,
@@ -210,6 +215,8 @@ MomentGstModule::createStreamChannel (ConstMemory   const channel_name,
 				      ConstMemory   const channel_desc,
 				      ConstMemory   const stream_spec,
 				      bool          const is_chain,
+                                      bool          const no_audio,
+                                      bool          const no_video,
 				      bool          const recording,
 				      ConstMemory   const record_filename,
                                       bool          const connect_on_demand,
@@ -231,6 +238,8 @@ MomentGstModule::createStreamChannel (ConstMemory   const channel_name,
 
     channel->init (moment,
 		   channel_name,
+                   no_audio,
+                   no_video,
 		   send_metadata,
                    enable_prechunking,
 		   keep_video_streams,
@@ -270,6 +279,8 @@ MomentGstModule::createDummyChannel (ConstMemory   const channel_name,
 
     channel->init (moment,
 		   channel_name,
+                   false /* no_audio */,
+                   false /* no_video */,
 		   send_metadata,
                    enable_prechunking,
 		   keep_video_streams,
@@ -592,6 +603,8 @@ MomentGstModule::adminHttpRequest (HttpRequest  * const mt_nonnull req,
 				       ConstMemory() /* channel_desc */,
 				       src_chain,
 				       true /* is_chain */,
+                                       false /* no_audio */,
+                                       false /* no_video */,
 				       false /* recording */,
 				       ConstMemory() /* record_path */,
                                        self->default_connect_on_demand,
@@ -602,6 +615,8 @@ MomentGstModule::adminHttpRequest (HttpRequest  * const mt_nonnull req,
 				       ConstMemory() /* channel_desc */,
 				       makeString ("file://", src_path)->mem(),
 				       false /* is_chain */,
+                                       false /* no_audio */,
+                                       false /* no_video */,
 				       false /* recording */,
 				       ConstMemory() /* record_path */,
                                        self->default_connect_on_demand,
@@ -612,6 +627,8 @@ MomentGstModule::adminHttpRequest (HttpRequest  * const mt_nonnull req,
 				       ConstMemory() /* channel_desc */,
 				       src_uri,
 				       false /* is_chain */,
+                                       false /* no_audio */,
+                                       false /* no_video */,
 				       false /* recording */,
 				       ConstMemory() /* record_path */,
                                        self->default_connect_on_demand,
@@ -621,6 +638,8 @@ MomentGstModule::adminHttpRequest (HttpRequest  * const mt_nonnull req,
 	    self->createPlaylistChannel (channel_name,
 					 ConstMemory() /* channel_desc */,
 					 src_playlist,
+                                         false /* no_audio */,
+                                         false /* no_video */,
 					 false /* recording */,
 					 ConstMemory() /* record_path */,
                                          self->default_connect_on_demand,
@@ -890,6 +909,105 @@ MomentGstModule::httpRequest (HttpRequest  * const mt_nonnull req,
     MOMENT_GST__HEADERS_DATE
 
     if (req->getNumPathElems() >= 2
+	&& equal (req->getPath (1), "wall_hls"))
+    {
+	PagePool::PageListHead page_list;
+
+	static char const prefix [] =
+		"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+		"<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Strict//EN\" \"http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd\">\n"
+		"<html style=\"height: 100%\" xmlns=\"http://www.w3.org/1999/xhtml\">\n"
+		"<head>\n"
+		"  <meta http-equiv=\"Content-Type\" content=\"text/html; charset=UTF-8\"/>\n"
+		"  <title>Wall</title>\n"
+		"</head>\n"
+		"<body bgcolor=\"#444444\" style=\"font-family: sans-serif\">\n"
+		"<table border=\"0\" cellpadding=\"0\" cellspacing=\"0\">\n";
+
+	static char const suffix [] =
+		"</table>\n"
+		"</body>\n"
+		"</html>\n";
+
+	self->page_pool->getFillPages (&page_list, ConstMemory (prefix, sizeof (prefix) - 1));
+
+	self->mutex.lock ();
+
+	{
+	    ChannelEntryHash::iter iter (self->channel_entry_hash);
+	    unsigned row_cnt = 0;
+	    unsigned const row_size = 3;
+	    while (!self->channel_entry_hash.iter_done (iter)) {
+		ChannelEntry * const channel_entry = self->channel_entry_hash.iter_next (iter);
+
+		if (row_cnt == 0) {
+		    static char const row_prefix [] = "<tr>\n";
+		    self->page_pool->getFillPages (&page_list, ConstMemory (row_prefix, sizeof (row_prefix) - 1));
+		}
+
+		Ref<String> const channel_uri = makeString (
+			this_hls_server_addr->mem(), "/hls/", channel_entry->channel_name->mem(), ".m3u8");
+
+		static char const entry_a [] =
+		        "<td style=\"vertical-align: top\">\n"
+			"<div style=\"position: relative; width: 320px; height: 240px; margin-left: auto; margin-right: auto\">\n"
+                        "  <video controls src=\"http://";
+		self->page_pool->getFillPages (&page_list, ConstMemory (entry_a, sizeof (entry_a) - 1));
+		self->page_pool->getFillPages (&page_list, channel_uri->mem());
+
+		static char const entry_b [] = "\">This browser does not support Apple HTTP Live Streaming</video>\n</div>\n";
+		self->page_pool->getFillPages (&page_list, ConstMemory (entry_b, sizeof (entry_b) - 1));
+
+		static char const entry_a0 [] =
+		        "<div style=\"width: 300px; padding-bottom: 15px; padding-left: 20px; color: white;\">";
+		self->page_pool->getFillPages (&page_list, ConstMemory (entry_a0, sizeof (entry_a0) - 1));
+		self->page_pool->getFillPages (&page_list, channel_entry->channel_name->mem());
+		static char const entry_a1 [] =
+			"&nbsp;&nbsp; ";
+		self->page_pool->getFillPages (&page_list, ConstMemory (entry_a1, sizeof (entry_a1) - 1));
+		self->page_pool->getFillPages (&page_list, channel_entry->channel_desc->mem());
+		static char const entry_a2 [] =
+			"</div>\n"
+			"</td>\n";
+		self->page_pool->getFillPages (&page_list, ConstMemory (entry_a2, sizeof (entry_a2) - 1));
+
+		++row_cnt;
+		if (row_cnt == row_size) {
+		    row_cnt = 0;
+
+		    static char const row_suffix [] = "</tr>\n";
+		    self->page_pool->getFillPages (&page_list, ConstMemory (row_suffix, sizeof (row_suffix) - 1));
+		}
+	    }
+
+	    if (row_cnt != 0) {
+		static char const row_suffix [] = "</tr>\n";
+		self->page_pool->getFillPages (&page_list, ConstMemory (row_suffix, sizeof (row_suffix) - 1));
+	    }
+	}
+
+	self->mutex.unlock ();
+
+	self->page_pool->getFillPages (&page_list, ConstMemory (suffix, sizeof (suffix) - 1));
+
+	Size content_len = 0;
+	{
+	    PagePool::Page *page = page_list.first;
+	    while (page) {
+		content_len += page->data_len;
+		page = page->getNextMsgPage();
+	    }
+	}
+
+	conn_sender->send (self->page_pool,
+			   false /* do_flush */,
+			   MOMENT_GST__OK_HEADERS ("text/html", content_len),
+			   "\r\n");
+	conn_sender->sendPages (self->page_pool, &page_list, true /* do_flush */);
+
+	logA_ ("mod_gst 200 ", req->getClientAddress(), " ", req->getRequestLine());
+    } else
+    if (req->getNumPathElems() >= 2
 	&& equal (req->getPath (1), "wall"))
     {
 	PagePool::PageListHead page_list;
@@ -1084,6 +1202,8 @@ MomentGstModule::parseSourcesConfigSection ()
 			         ConstMemory() /* channel_desc */,
 				 stream_uri,
 				 false /* is_chain */,
+                                 false /* no_audio */,
+                                 false /* no_video */,
 				 false /* recording */,
 				 ConstMemory() /* record_filename */,
                                  default_connect_on_demand,
@@ -1164,7 +1284,9 @@ MomentGstModule::parseChainsConfigSection ()
 	    createStreamChannel (stream_name,
 			         ConstMemory() /* channel_desc */,
 				 chain_spec,
-				 true /* is_chain */,
+				 true  /* is_chain */,
+                                 false /* no_audio */,
+                                 false /* no_video */,
 				 false /* recording */,
 				 ConstMemory() /* record_filename */,
                                  default_connect_on_demand,
@@ -1229,7 +1351,9 @@ MomentGstModule::parseChainsConfigSection ()
 	    createStreamChannel (stream_name,
 			         ConstMemory() /* channel_desc */,
 				 chain_spec,
-				 true /* is_chain */,
+				 true  /* is_chain */,
+                                 false /* no_audio */,
+                                 false /* no_video */,
 				 got_record_path /* recording */,
 				 record_path,
                                  default_connect_on_demand,
@@ -1446,11 +1570,55 @@ MomentGstModule::parseStreamsConfigSection ()
                 }
             }
 
+            bool no_audio = false;
+            {
+                ConstMemory const opt_name = "no_audio";
+                MConfig::Option * const opt = item_section->getOption (opt_name);
+                if (opt) {
+                    MConfig::BooleanValue const val = opt->getBoolean();
+                    if (val == MConfig::Boolean_Invalid) {
+                        logE_ (_func, "Invalid value for ", opt_name, ": ", config->getString (opt_name));
+                        return Result::Failure;
+                    }
+
+                    if (val == MConfig::Boolean_True)
+                        no_audio = true;
+                    else
+                    if (val == MConfig::Boolean_False)
+                        no_audio = false;
+                    else
+                        assert (val == MConfig::Boolean_Default);
+                }
+            }
+
+            bool no_video = false;
+            {
+                ConstMemory const opt_name = "no_video";
+                MConfig::Option * const opt = item_section->getOption (opt_name);
+                if (opt) {
+                    MConfig::BooleanValue const val = opt->getBoolean();
+                    if (val == MConfig::Boolean_Invalid) {
+                        logE_ (_func, "Invalid value for ", opt_name, ": ", config->getString (opt_name));
+                        return Result::Failure;
+                    }
+
+                    if (val == MConfig::Boolean_True)
+                        no_video = true;
+                    else
+                    if (val == MConfig::Boolean_False)
+                        no_video = false;
+                    else
+                        assert (val == MConfig::Boolean_Default);
+                }
+            }
+
 	    if (chain && !chain->isNull()) {
 		createStreamChannel (stream_name->mem(),
 				     channel_desc->mem(),
 				     chain->mem(),
 				     true /* is_chain */,
+                                     no_audio,
+                                     no_video,
 				     record_path ? true : false /* recording */,
 				     record_path ? record_path->mem() : ConstMemory(),
                                      connect_on_demand,
@@ -1462,6 +1630,8 @@ MomentGstModule::parseStreamsConfigSection ()
 				     channel_desc->mem(),
 				     uri->mem(),
 				     false /* is_chain */,
+                                     no_audio,
+                                     no_video,
 				     record_path ? true : false /* recording */,
 				     record_path ? record_path->mem() : ConstMemory(),
                                      connect_on_demand,
@@ -1473,6 +1643,8 @@ MomentGstModule::parseStreamsConfigSection ()
 		createPlaylistChannel (stream_name->mem(),
 				       channel_desc->mem(),
 				       playlist->mem(),
+                                       no_audio,
+                                       no_video,
 				       record_path ? true : false /* recording */,
 				       record_path ? record_path->mem() : ConstMemory(),
                                        connect_on_demand,
@@ -1698,6 +1870,19 @@ MomentGstModule::init (MomentServer * const moment)
 	    this_rtmpt_server_addr = grab (new String ("127.0.0.1:8081"));
 	    logI_ (_func, opt_name, " config parameter is not set. "
 		   "Defaulting to ", this_rtmpt_server_addr);
+	}
+    }
+
+    {
+	ConstMemory const opt_name = "moment/this_hls_server_addr";
+	ConstMemory const opt_val = config->getString (opt_name);
+	logI_ (_func, opt_name, ": ", opt_val);
+	if (!opt_val.isNull()) {
+	    this_hls_server_addr = grab (new String (opt_val));
+	} else {
+	    this_hls_server_addr = grab (new String ("127.0.0.1:8080"));
+	    logI_ (_func, opt_name, " config parameter is not set. "
+		   "Defaulting to ", this_hls_server_addr);
 	}
     }
 
