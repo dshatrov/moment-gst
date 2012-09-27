@@ -25,17 +25,19 @@ using namespace Moment;
 
 namespace MomentGst {
 
-static LogGroup libMary_logGroup_chains ("moment-gst_chains", LogLevel::I);
-static LogGroup libMary_logGroup_pipeline ("moment-gst_pipeline", LogLevel::I);
-static LogGroup libMary_logGroup_stream ("moment-gst_stream", LogLevel::I);
-static LogGroup libMary_logGroup_bus ("moment-gst_bus", LogLevel::I);
-static LogGroup libMary_logGroup_frames ("moment-gst_frames", LogLevel::E); // E is the default
-static LogGroup libMary_logGroup_novideo ("moment-gst_novideo", LogLevel::I);
+static LogGroup libMary_logGroup_chains   ("moment-gst_chains",   LogLevel::D);
+static LogGroup libMary_logGroup_pipeline ("moment-gst_pipeline", LogLevel::D);
+static LogGroup libMary_logGroup_stream   ("moment-gst_stream",   LogLevel::D);
+static LogGroup libMary_logGroup_bus      ("moment-gst_bus",      LogLevel::D);
+static LogGroup libMary_logGroup_frames   ("moment-gst_frames",   LogLevel::E); // E is the default
+static LogGroup libMary_logGroup_novideo  ("moment-gst_novideo",  LogLevel::D);
 
 void
 GstStream::workqueueThreadFunc (void * const _self)
 {
     GstStream * const self = static_cast <GstStream*> (_self);
+
+    logD (pipeline, _self_func_);
 
     updateTime ();
 
@@ -98,7 +100,7 @@ GstStream::createPipelineForChainSpec ()
 
   {
     GError *error = NULL;
-    chain_el = gst_parse_launch (stream_spec->cstr (), &error);
+    chain_el = gst_parse_launch (stream_spec->cstr(), &error);
     if (!chain_el) {
 	if (error) {
 	    logE_ (_func, "gst_parse_launch() failed: ", error->code,
@@ -112,12 +114,11 @@ GstStream::createPipelineForChainSpec ()
     }
 
     mutex.lock ();
+    playbin = chain_el;
+    gst_object_ref (playbin);
 
     if (stream_closed)
 	goto _failure;
-
-    playbin = chain_el;
-    gst_object_ref (playbin);
 
     {
 	in_stats_el = gst_bin_get_by_name (GST_BIN (chain_el), "in_stats");
@@ -251,6 +252,8 @@ _return:
 void
 GstStream::createPipelineForUri ()
 {
+    logD (pipeline, _this_func_);
+
     assert (!is_chain);
 
     if (!stream_spec->mem().len())
@@ -511,16 +514,19 @@ _return:
 mt_unlocks (mutex) Result
 GstStream::setPipelinePlaying ()
 {
+    logD (pipeline, _this_func_);
+
     GstElement * const chain_el = playbin;
     assert (chain_el);
     gst_object_ref (chain_el);
 
     if (no_video_timeout > 0) {
-	no_video_timer = timers->addTimer (noVideoTimerTick,
-					   this /* cb_data */,
-					   this /* coderef_container */,
+	no_video_timer = timers->addTimer (CbDesc<Timers::TimerCallback> (noVideoTimerTick,
+                                                                          this /* cb_data */,
+                                                                          this /* coderef_container */),
 					   no_video_timeout /* TODO config param for the timeout */,
-					   true /* periodical */);
+					   true  /* periodical */,
+                                           false /* auto_delete */);
     }
 
     changing_state_to_playing = true;
@@ -568,48 +574,18 @@ _failure:
 mt_unlocks (mutex) void
 GstStream::pipelineCreationFailed ()
 {
-    if (no_video_timer) {
-	timers->deleteTimer (no_video_timer);
-	no_video_timer = NULL;
-    }
-
-    stream_closed = true;
-
-    GstElement * const tmp_playbin = playbin;
-    playbin = NULL;
-
-    GstElement * const tmp_mix_audio_src = GST_ELEMENT (mix_audio_src);
-    mix_audio_src = NULL;
-
-    GstElement * const tmp_mix_video_src = GST_ELEMENT (mix_video_src);
-    mix_video_src = NULL;
+    logD (pipeline, _this_func_);
 
     eos_pending = true;
-
     mutex.unlock ();
 
-    reportStatusEvents ();
-
-    if (tmp_playbin) {
-	// Extra transition to NULL state for extra safety.
-	logD (pipeline, _func, "Setting pipeline state to NULL");
-	if (gst_element_set_state (tmp_playbin, GST_STATE_NULL) == GST_STATE_CHANGE_FAILURE)
-	    logE_ (_func, "gst_element_set_state() failed (NULL)");
-
-	gst_object_unref (tmp_playbin);
-    }
-
-    if (tmp_mix_audio_src)
-	gst_object_unref (tmp_mix_audio_src);
-
-    if (tmp_mix_video_src)
-	gst_object_unref (tmp_mix_video_src);
+    releasePipeline ();
 }
 
 void
 GstStream::doReleasePipeline ()
 {
-    logD (pipeline, _func_);
+    logD (pipeline, _this_func_);
 
     mutex.lock ();
 
@@ -634,6 +610,8 @@ GstStream::doReleasePipeline ()
     stream_closed = true;
     mutex.unlock ();
 
+    reportStatusEvents ();
+
     if (tmp_playbin) {
 	if (to_null_state) {
 	    logD (pipeline, _func, "Setting pipeline state to NULL");
@@ -654,6 +632,8 @@ GstStream::doReleasePipeline ()
 void
 GstStream::releasePipeline ()
 {
+    logD (pipeline, _this_func_);
+
     mutex.lock ();
 
     while (!workqueue_list.isEmpty()) {
@@ -678,12 +658,12 @@ GstStream::releasePipeline ()
 
     bool const join = (tlocal != libMary_getThreadLocal());
 
+    Ref<Thread> const tmp_workqueue_thread = workqueue_thread;
+    workqueue_thread = NULL;
     mutex.unlock ();
 
-    if (join) {
-        //#error joining from the same thread - WRONG
-        workqueue_thread->join ();
-    }
+    if (join)
+        tmp_workqueue_thread->join ();
 }
 
 mt_mutex (mutex) void
@@ -1511,6 +1491,7 @@ GstStream::busSyncHandler (GstBus     * const /* bus */,
 			   GstMessage * const msg,
 			   gpointer     const _self)
 {
+    updateTime ();
     logD (bus, _func, gst_message_type_get_name (GST_MESSAGE_TYPE (msg)), ", src: 0x", fmt_hex, (UintPtr) GST_MESSAGE_SRC (msg));
 
     GstStream * const self = static_cast <GstStream*> (_self);
@@ -1652,7 +1633,7 @@ GstStream::noVideoTimerTick (void * const _self)
     Time const time = getTime();
 
     self->mutex.lock ();
-    logD (novideo, _func, "time: 0x", fmt_hex, time, ", last_frame_time: 0x", self->last_frame_time);
+    logD (novideo, _self_func, "time: 0x", fmt_hex, time, ", last_frame_time: 0x", self->last_frame_time);
 
     if (self->stream_closed) {
 	self->mutex.unlock ();
@@ -1754,8 +1735,10 @@ GstStream::mixStreamVideoMessage (VideoStream::VideoMessage * const mt_nonnull v
 	}
 
 	PagePool::PageListArray pl_array (normalized_pages.first, video_msg->msg_len);
-	if (video_msg->msg_len > 0)
+	if (video_msg->msg_len > 0) {
+            // TODO 1. FLV header stripping is not necessary anymore, "-1" len bug.
 	    pl_array.get (1 /* TEST FLV VIDEO TAG STRIPPING */ /* offset */, Memory (GST_BUFFER_DATA (buffer), video_msg->msg_len - 1));
+        }
 
 	if (unref_normalized_pages)
 	    normalized_page_pool->msgUnref (normalized_pages.first);
@@ -1780,6 +1763,8 @@ GstStream::mixStreamVideoMessage (VideoStream::VideoMessage * const mt_nonnull v
 void
 GstStream::doCreatePipeline ()
 {
+    logD (pipeline, _this_func_);
+
     if (is_chain)
 	createPipelineForChainSpec ();
     else
@@ -1789,6 +1774,8 @@ GstStream::doCreatePipeline ()
 void
 GstStream::createPipeline ()
 {
+    logD (pipeline, _this_func_);
+
     mutex.lock ();
 
     while (!workqueue_list.isEmpty()) {
@@ -1993,6 +1980,8 @@ GstStream::init (ConstMemory   const stream_name,
 		 Uint64        const default_bitrate,
 		 Time          const no_video_timeout)
 {
+    logD (pipeline, _this_func_);
+
     this->stream_name = grab (new String (stream_name));
 
     this->stream_spec = grab (new String (stream_spec));
@@ -2127,16 +2116,16 @@ GstStream::GstStream ()
 
       tlocal (NULL)
 {
+    logD (pipeline, _this_func_);
 }
 
 GstStream::~GstStream ()
 {
-    logD (pipeline, _func, "~GstStream()");
+    logD (pipeline, _this_func_);
 
     mutex.lock ();
-    if (!stream_closed) {
-        unreachable ();
-    }
+    assert (stream_closed);
+    assert (!workqueue_thread);
     mutex.unlock ();
 
     if (mix_audio_caps)

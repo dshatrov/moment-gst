@@ -25,6 +25,8 @@ using namespace Moment;
 
 namespace MomentGst {
 
+static LogGroup libMary_logGroup_ctl ("mod_gst/GstStreamCtl", LogLevel::D);
+
 void
 GstStreamCtl::setStreamParameters (VideoStream * const mt_nonnull video_stream)
 {
@@ -153,6 +155,8 @@ GstStreamCtl::beginConnectOnDemand (bool const start_timer)
 mt_mutex (mutex) void
 GstStreamCtl::createStream (Time const initial_seek)
 {
+    logD (ctl, _this_func_);
+
 /* closeStream() is always called before createStream(), so this is unnecessary.
  *
     if (gst_stream) {
@@ -227,6 +231,8 @@ GstStreamCtl::streamThreadFunc (gpointer const _gst_stream)
 {
     GstStream * const gst_stream = static_cast <GstStream*> (_gst_stream);
 
+    logD (ctl, _func_);
+
     updateTime ();
     gst_stream->createPipeline ();
 
@@ -237,7 +243,7 @@ GstStreamCtl::streamThreadFunc (gpointer const _gst_stream)
 mt_mutex (mutex) void
 GstStreamCtl::closeStream (bool const replace_video_stream)
 {
-    logD_ (_func_);
+    logD (ctl, _this_func_);
 
     got_video = false;
 
@@ -301,10 +307,10 @@ GstStreamCtl::closeStream (bool const replace_video_stream)
 mt_unlocks (mutex) void
 GstStreamCtl::doRestartStream (bool const from_ondemand_reconnect)
 {
-    logD_ (_func_);
+    logD (ctl, _this_func_);
 
     bool new_video_stream = false;
-    if (!gst_stream
+    if (gst_stream
         && !from_ondemand_reconnect)
     {
         closeStream (true /* replace_video_stream */);
@@ -330,7 +336,7 @@ GstStreamCtl::deferredTask (void * const _self)
 {
     GstStreamCtl * const self = static_cast <GstStreamCtl*> (_self);
 
-    logD_ (_func, "this: 0x", fmt_hex, (UintPtr) self);
+    logD (ctl, _self_func_);
 
   {
     self->mutex.lock ();
@@ -363,6 +369,8 @@ GstStreamCtl::streamError (void * const _stream_data)
     StreamData * const stream_data = static_cast <StreamData*> (_stream_data);
     GstStreamCtl * const self = stream_data->gst_stream_ctl;
 
+    logD (ctl, _self_func_);
+
     self->mutex.lock ();
 
     stream_data->stream_closed = true;
@@ -385,6 +393,8 @@ GstStreamCtl::streamEos (void * const _stream_data)
 {
     StreamData * const stream_data = static_cast <StreamData*> (_stream_data);
     GstStreamCtl * const self = stream_data->gst_stream_ctl;
+
+    logD (ctl, _self_func_);
 
     self->mutex.lock ();
 
@@ -427,7 +437,7 @@ GstStreamCtl::gotVideo (void * const _stream_data)
     StreamData * const stream_data = static_cast <StreamData*> (_stream_data);
     GstStreamCtl * const self = stream_data->gst_stream_ctl;
 
-    logD_ (_func_, " 0x", fmt_hex, (UintPtr) self);
+    logD (ctl, _self_func_);
 
     self->mutex.lock ();
     if (stream_data != self->cur_stream_data ||
@@ -447,6 +457,8 @@ GstStreamCtl::streamStatusEvent (void * const _stream_data)
     StreamData * const stream_data = static_cast <StreamData*> (_stream_data);
     GstStreamCtl * const self = stream_data->gst_stream_ctl;
 
+    logD (ctl, _self_func_);
+
     self->deferred_reg.scheduleTask (&self->deferred_task, false /* permanent */);
 }
 
@@ -459,6 +471,8 @@ GstStreamCtl::beginVideoStream (ConstMemory      const stream_spec,
 				VirtReferenced * const stream_ticket_ref,
 				Time             const seek)
 {
+    logD (ctl, _this_func_);
+
     mutex.lock ();
 
     if (gst_stream)
@@ -478,6 +492,8 @@ GstStreamCtl::beginVideoStream (ConstMemory      const stream_spec,
 void
 GstStreamCtl::endVideoStream ()
 {
+    logD (ctl, _this_func_);
+
     mutex.lock ();
 
     stream_stopped = true;
@@ -491,6 +507,8 @@ GstStreamCtl::endVideoStream ()
 void
 GstStreamCtl::restartStream ()
 {
+    logD (ctl, _this_func_);
+
     mutex.lock ();
     mt_unlocks (mutex) doRestartStream ();
 }
@@ -558,6 +576,8 @@ GstStreamCtl::init (MomentServer      * const moment,
 		    Uint64              const default_bitrate,
 		    Time                const no_video_timeout)
 {
+    logD (ctl, _this_func_);
+
     this->moment = moment;
     this->timers = moment->getServerApp()->getServerContext()->getTimers();
     this->page_pool = moment->getPagePool();
@@ -622,7 +642,7 @@ GstStreamCtl::GstStreamCtl ()
       rx_audio_bytes_accum (0),
       rx_video_bytes_accum (0)
 {
-    logD_ (_func, "0x", fmt_hex, (UintPtr) this);
+    logD (ctl, _this_func_);
 
     deferred_task.cb = CbDesc<DeferredProcessor::TaskCallback> (
 	    deferredTask, this /* cb_data */, this /* coderef_container */);
@@ -630,19 +650,13 @@ GstStreamCtl::GstStreamCtl ()
 
 GstStreamCtl::~GstStreamCtl ()
 {
-    logD_ (_func, "0x", fmt_hex, (UintPtr) this);
+    logD (ctl, _this_func_);
 
     mutex.lock ();
     if (gst_stream) {
         gst_stream->releasePipeline ();
         gst_stream = NULL;
     }
-
-    if (connect_on_demand_timer) {
-        timers->deleteTimer (connect_on_demand_timer);
-        connect_on_demand_timer = NULL;
-    }
-
     mutex.unlock ();
 
     deferred_reg.release ();
