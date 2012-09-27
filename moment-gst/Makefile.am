@@ -1,6 +1,6 @@
-COMMON_CFLAGS =				\
-	-ggdb				\
-	-Wno-long-long -Wall -Wextra	\
+COMMON_CFLAGS =			\
+	-ggdb			\
+	-Wno-long-long -Wall    \
 	$(THIS_CFLAGS)
 
 if PLATFORM_WIN32
@@ -10,8 +10,8 @@ else
     COMMON_CFLAGS += -rdynamic -pthread
 endif
 
-AM_CFLAGS = -std=gnu99 $(COMMON_CFLAGS)
-AM_CXXFLAGS = -std=gnu++0x $(COMMON_CFLAGS)
+AM_CFLAGS   += -std=gnu99 $(COMMON_CFLAGS)
+AM_CXXFLAGS += $(COMMON_CFLAGS)
 
 INCLUDES = -I$(top_srcdir)
 
