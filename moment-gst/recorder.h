@@ -36,6 +36,8 @@ using namespace Moment;
 class Recorder : public Object
 {
 private:
+    StateMutex mutex;
+
     class Recording : public Referenced
     {
     public:
@@ -58,8 +60,6 @@ private:
     mt_mutex (mutex) WeakRef<Channel> weak_cur_channel;
     mt_mutex (mutex) WeakRef<VideoStream> weak_cur_video_stream;
     mt_mutex (mutex) GenericInformer::SubscriptionKey channel_sbn;
-
-    StateMutex mutex;
 
     mt_iface (Playback::Frontend)
     mt_begin

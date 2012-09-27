@@ -34,6 +34,8 @@ using namespace Moment;
 class ChannelSet
 {
 private:
+    StateMutex mutex;
+
     class ChannelEntry : public HashEntry<>
     {
     public:
@@ -54,8 +56,6 @@ private:
 	    ChannelEntryHash;
 
     mt_mutex (mutex) ChannelEntryHash channel_entry_hash;
-
-    StateMutex mutex;
 
 public:
     typedef ChannelEntry* ChannelKey;

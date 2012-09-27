@@ -33,6 +33,9 @@ using namespace Moment;
 
 class Playback : public DependentCodeReferenced
 {
+private:
+    StateMutex mutex;
+
 public:
     class AdvanceTicket : public Referenced
     {
@@ -81,8 +84,6 @@ private:
       bool advancing;
 
     mt_end
-
-    StateMutex mutex;
 
     mt_unlocks_locks (mutex) void advancePlayback ();
 

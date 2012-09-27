@@ -401,12 +401,6 @@ Playback::Playback (Object * const coderef_container)
 Playback::~Playback ()
 {
     mutex.lock ();
-
-    if (playback_timer) {
-	timers->deleteTimer (playback_timer);
-	playback_timer = NULL;
-    }
-
     mutex.unlock ();
 }
 

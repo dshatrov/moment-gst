@@ -142,10 +142,6 @@ private:
     mt_mutex (mutex) Uint64 rx_audio_bytes_accum;
     mt_mutex (mutex) Uint64 rx_video_bytes_accum;
 
-    // Separate state mutex to decouple from synchronization of deletion
-    // subscriptions.
-    StateMutex mutex;
-
     mt_const Cb<Frontend> frontend;
 
     void setStreamParameters (VideoStream * mt_nonnull video_stream);
