@@ -115,7 +115,8 @@ public:
     mt_const void init (MomentServer *moment,
 			PagePool     *page_pool,
 			ChannelSet   *channel_set,
-			ConstMemory   filename_prefix);
+			ConstMemory   filename_prefix,
+                        Uint64        min_playlist_duration_sec);
 
     Recorder ();
 

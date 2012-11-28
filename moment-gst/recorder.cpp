@@ -256,13 +256,15 @@ mt_const void
 Recorder::init (MomentServer * const moment,
 		PagePool     * const page_pool,
 		ChannelSet   * const channel_set,
-		ConstMemory    const filename_prefix)
+		ConstMemory    const filename_prefix,
+                Uint64         const min_playlist_duration_sec)
 {
     this->moment = moment;
     this->channel_set = channel_set;
     this->filename_prefix = grab (new String (filename_prefix));
 
-    playback.init (moment->getServerApp()->getServerContext()->getTimers());
+    playback.init (moment->getServerApp()->getServerContext()->getTimers(),
+                   min_playlist_duration_sec);
     playback.setFrontend (CbDesc<Playback::Frontend> (
 	    &playback_frontend,
 	    this /* cb_data */,

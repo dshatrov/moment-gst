@@ -61,6 +61,8 @@ private:
 
     mt_const Timers *timers;
 
+    mt_const Uint64 min_playlist_duration_sec;
+
     mt_mutex (mutex)
     mt_begin
 
@@ -124,7 +126,8 @@ public:
 	this->frontend = frontend;
     }
 
-    mt_const void init (Timers *timers);
+    mt_const void init (Timers *timers,
+                        Uint64  min_playlist_duration_sec);
 
     Playback (Object *coderef_container);
 

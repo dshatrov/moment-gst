@@ -20,8 +20,6 @@
 #include <libmary/types.h>
 #include <gst/gst.h>
 
-#include <libmary/module_init.h>
-
 #include <moment/libmoment.h>
 
 #include <moment-gst/moment_gst_module.h>
@@ -188,12 +186,14 @@ MomentGstModule::createPlaylistChannel (ConstMemory   const channel_name,
 		   send_metadata,
                    enable_prechunking,
 		   keep_video_streams,
+                   continuous_playback,
                    connect_on_demand,
                    connect_on_demand_timeout,
 		   default_width,
 		   default_height,
 		   default_bitrate,
-		   no_video_timeout);
+		   no_video_timeout,
+                   min_playlist_duration_sec);
 
     mutex.lock ();
     channel_entry_hash.add (channel_entry);
@@ -243,12 +243,14 @@ MomentGstModule::createStreamChannel (ConstMemory   const channel_name,
 		   send_metadata,
                    enable_prechunking,
 		   keep_video_streams,
+                   continuous_playback,
                    connect_on_demand,
                    connect_on_demand_timeout,
 		   default_width,
 		   default_height,
 		   default_bitrate,
-		   no_video_timeout);
+		   no_video_timeout,
+                   min_playlist_duration_sec);
 
     mutex.lock ();
     channel_entry_hash.add (channel_entry);
@@ -284,12 +286,14 @@ MomentGstModule::createDummyChannel (ConstMemory   const channel_name,
 		   send_metadata,
                    enable_prechunking,
 		   keep_video_streams,
+                   continuous_playback,
                    false /* connect_on_demand */,
                    60    /* connect_on_demand_timeout */,
 		   default_width,
 		   default_height,
 		   default_bitrate,
-		   no_video_timeout);
+		   no_video_timeout,
+                   min_playlist_duration_sec);
 
     mutex.lock ();
     channel_entry_hash.add (channel_entry);
@@ -315,7 +319,8 @@ MomentGstModule::createPlaylistRecorder (ConstMemory const recorder_name,
     recorder->init (moment,
 		    page_pool,
 		    &channel_set,
-		    filename_prefix);
+		    filename_prefix,
+                    min_playlist_duration_sec);
 
     mutex.lock ();
     recorder_entry_hash.add (recorder_entry);
@@ -344,7 +349,8 @@ MomentGstModule::createChannelRecorder (ConstMemory const recorder_name,
     recorder->init (moment,
 		    page_pool,
 		    &channel_set,
-		    filename_prefix);
+		    filename_prefix,
+                    min_playlist_duration_sec);
 
     mutex.lock ();
     recorder_entry_hash.add (recorder_entry);
@@ -961,15 +967,23 @@ MomentGstModule::httpRequest (HttpRequest  * const mt_nonnull req,
 		static char const entry_a0 [] =
 		        "<div style=\"width: 300px; padding-bottom: 15px; padding-left: 20px; color: white;\">";
 		self->page_pool->getFillPages (&page_list, ConstMemory (entry_a0, sizeof (entry_a0) - 1));
+                static char const entry_a2 [] =
+                        "<a href=\"http://";
+		self->page_pool->getFillPages (&page_list, ConstMemory (entry_a2, sizeof (entry_a2) - 1));
+		self->page_pool->getFillPages (&page_list, channel_uri->mem());
+                static char const entry_a3 [] =
+                        "\">";
+		self->page_pool->getFillPages (&page_list, ConstMemory (entry_a3, sizeof (entry_a3) - 1));
 		self->page_pool->getFillPages (&page_list, channel_entry->channel_name->mem());
 		static char const entry_a1 [] =
 			"&nbsp;&nbsp; ";
 		self->page_pool->getFillPages (&page_list, ConstMemory (entry_a1, sizeof (entry_a1) - 1));
 		self->page_pool->getFillPages (&page_list, channel_entry->channel_desc->mem());
-		static char const entry_a2 [] =
+		static char const entry_a4 [] =
+                        "</a>\n"
 			"</div>\n"
 			"</td>\n";
-		self->page_pool->getFillPages (&page_list, ConstMemory (entry_a2, sizeof (entry_a2) - 1));
+		self->page_pool->getFillPages (&page_list, ConstMemory (entry_a4, sizeof (entry_a4) - 1));
 
 		++row_cnt;
 		if (row_cnt == row_size) {
@@ -1792,6 +1806,21 @@ MomentGstModule::init (MomentServer * const moment)
     }
 
     {
+        ConstMemory const opt_name = "mod_gst/continuous_playback";
+        MConfig::BooleanValue const val = config->getBoolean (opt_name);
+        if (val == MConfig::Boolean_Invalid) {
+            logE_ (_func, "Invalid value for ", opt_name, ": ", config->getString (opt_name));
+            return Result::Failure;
+        }
+
+        if (val == MConfig::Boolean_False) {
+            continuous_playback = false;
+        } else {
+            continuous_playback = true;
+        }
+    }
+
+    {
 	ConstMemory const opt_name = "mod_gst/width";
 	MConfig::GetResult const res = config->getUint64_default (
 		opt_name, &default_width, default_width);
@@ -1831,6 +1860,16 @@ MomentGstModule::init (MomentServer * const moment)
 	    return Result::Failure;
 	}
 	no_video_timeout = (Time) tmp_uint64;
+    }
+
+    {
+        ConstMemory const opt_name = "mod_gst/min_playlist_duration";
+        MConfig::GetResult const res = config->getUint64_default (
+                opt_name, &min_playlist_duration_sec, min_playlist_duration_sec);
+        if (!res) {
+            logE_ (_func, "bad value for ", opt_name);
+            return Result::Failure;
+        }
     }
 
     {
@@ -1920,12 +1959,14 @@ MomentGstModule::MomentGstModule()
       send_metadata (false),
       enable_prechunking (false),
       keep_video_streams (false),
+      continuous_playback (true),
       default_connect_on_demand (false),
       default_connect_on_demand_timeout (60),
       default_width (0),
       default_height (0),
       default_bitrate (500000),
-      no_video_timeout (60)
+      no_video_timeout (60),
+      min_playlist_duration_sec (10)
 {
 }
 

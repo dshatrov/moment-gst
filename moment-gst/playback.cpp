@@ -81,12 +81,11 @@ Playback::advancePlayback ()
 	    {
 		Time const unixtime = getUnixtime ();
 
-		Time const min_duration = 10;
 		Time const pause_time = 10;
 		if (unixtime >= last_playlist_end_time
-		    && unixtime - last_playlist_end_time < min_duration)
+		    && unixtime - last_playlist_end_time < min_playlist_duration_sec)
 		{
-		    logW_ (_func, "Playlist is shorter than ", min_duration, " seconds. "
+		    logW_ (_func, "Playlist is shorter than ", min_playlist_duration_sec, " seconds. "
 			   "Pausing for ", pause_time, " seconds.");
 
 		    playback_timer = timers->addTimer (
@@ -370,16 +369,20 @@ Playback::loadPlaylistMem (ConstMemory    const mem,
     return doLoadPlaylist (mem, keep_cur_item, ret_err_msg, false /* is_file */);
 }
 
-void
-Playback::init (Timers * const timers)
+mt_const void
+Playback::init (Timers * const timers,
+                Uint64   const min_playlist_duration_sec)
 {
     this->timers = timers;
+    this->min_playlist_duration_sec = min_playlist_duration_sec;
 }
 
 Playback::Playback (Object * const coderef_container)
     : DependentCodeReferenced (coderef_container),
 
       timers (NULL),
+
+      min_playlist_duration_sec (10),
 
       cur_item (NULL),
 

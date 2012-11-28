@@ -178,14 +178,17 @@ Channel::init (MomentServer * const moment,
 	       bool           const send_metadata,
                bool           const enable_prechunking,
 	       bool           const keep_video_stream,
+               bool           const continuous_playback,
                bool           const connect_on_demand,
                Time           const connect_on_demand_timeout,
 	       Size           const default_width,
 	       Size           const default_height,
 	       Size           const default_bitrate,
-	       Time           const no_video_timeout)
+	       Time           const no_video_timeout,
+               Uint64         const min_playlist_duration_sec)
 {
-    playback.init (moment->getServerApp()->getServerContext()->getTimers());
+    playback.init (moment->getServerApp()->getServerContext()->getTimers(),
+                   min_playlist_duration_sec);
     playback.setFrontend (CbDesc<Playback::Frontend> (
 	    &playback_frontend, this /* cb_data */, this /* coderef_container */));
 
@@ -198,6 +201,7 @@ Channel::init (MomentServer * const moment,
 		      send_metadata,
                       enable_prechunking,
 		      keep_video_stream,
+                      continuous_playback,
                       connect_on_demand,
                       connect_on_demand_timeout,
 		      default_width,

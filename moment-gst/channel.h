@@ -167,12 +167,14 @@ public:
 			bool          send_metadata,
                         bool          enable_prechunking,
 			bool          keep_video_stream,
+                        bool          continuous_playback,
                         bool          connect_on_demand,
                         Time          connect_on_demand_timeout,
 			Size          default_width,
 			Size          default_height,
 			Size          default_bitrate,
-			Time          no_video_timeout);
+			Time          no_video_timeout,
+                        Uint64        min_playlist_duration_sec);
 
     Channel ();
 };

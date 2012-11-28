@@ -89,6 +89,7 @@ private:
     mt_const bool send_metadata;
     mt_const bool enable_prechunking;
     mt_const bool keep_video_streams;
+    mt_const bool continuous_playback;
     mt_const bool default_connect_on_demand;
     mt_const Time default_connect_on_demand_timeout;
 
@@ -97,6 +98,7 @@ private:
     mt_const Uint64 default_bitrate;
 
     mt_const Time no_video_timeout;
+    mt_const Uint64 min_playlist_duration_sec;
 
     mt_mutex (mutex) ChannelEntryHash channel_entry_hash;
     mt_mutex (mutex) RecorderEntryHash recorder_entry_hash;

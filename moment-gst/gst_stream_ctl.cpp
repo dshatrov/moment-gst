@@ -188,6 +188,12 @@ GstStreamCtl::createStream (Time const initial_seek)
 	video_stream_key = moment->addVideoStream (video_stream, stream_name->mem());
     }
 
+    Ref<VideoStream> bind_stream = video_stream;
+    if (continuous_playback) {
+        bind_stream = grab (new VideoStream);
+        video_stream->bindToStream (bind_stream, bind_stream, true, true);
+    }
+
     beginConnectOnDemand (true /* start_timer */);
 
     if (stream_start_time == 0)
@@ -199,7 +205,7 @@ GstStreamCtl::createStream (Time const initial_seek)
 		      is_chain,
 		      timers,
 		      page_pool,
-		      video_stream,
+		      bind_stream,
 		      moment->getMixVideoStream(),
 		      initial_seek,
 		      send_metadata,
@@ -269,7 +275,8 @@ GstStreamCtl::closeStream (bool const replace_video_stream)
 
     if (video_stream
         && replace_video_stream
-	&& !keep_video_stream)
+	&& !keep_video_stream
+        && !continuous_playback)
     {
 	// TODO moment->replaceVideoStream() to swap video streams atomically
 	moment->removeVideoStream (video_stream_key);
@@ -297,7 +304,9 @@ GstStreamCtl::closeStream (bool const replace_video_stream)
 	    logD_ (_func, "Calling moment->addVideoStream, stream_name: ", stream_name->mem());
 	    video_stream_key = moment->addVideoStream (video_stream, stream_name->mem());
 
-            beginConnectOnDemand (false /* start_timer */);
+// This seems to be unnecessary here.
+//            // FIXME Connect on demand is not resumed if we don't get here. Bug.
+//            beginConnectOnDemand (false /* start_timer */);
 	}
     }
 
@@ -569,6 +578,7 @@ GstStreamCtl::init (MomentServer      * const moment,
 		    bool                const send_metadata,
                     bool                const enable_prechunking,
 		    bool                const keep_video_stream,
+                    bool                const continuous_playback,
                     bool                const connect_on_demand,
                     Time                const connect_on_demand_timeout,
 		    Uint64              const default_width,
@@ -589,6 +599,7 @@ GstStreamCtl::init (MomentServer      * const moment,
     this->send_metadata = send_metadata;
     this->enable_prechunking = enable_prechunking;
     this->keep_video_stream = keep_video_stream;
+    this->continuous_playback = continuous_playback;
 
     this->connect_on_demand = connect_on_demand;
     this->connect_on_demand_timeout = connect_on_demand_timeout;
@@ -620,6 +631,8 @@ GstStreamCtl::GstStreamCtl ()
 
       send_metadata (true),
       enable_prechunking (true),
+      keep_video_stream (false),
+      continuous_playback (true),
 
       default_width (0),
       default_height (0),
@@ -653,10 +666,16 @@ GstStreamCtl::~GstStreamCtl ()
     logD (ctl, _this_func_);
 
     mutex.lock ();
+
+    closeStream (false /* replace_video_stream */);
+
+#if 0
     if (gst_stream) {
         gst_stream->releasePipeline ();
         gst_stream = NULL;
     }
+#endif
+
     mutex.unlock ();
 
     deferred_reg.release ();

@@ -46,7 +46,7 @@ public:
 	// by GstStreamCtl's initiative. E.g., when it reconnects to the video
 	// source after no_video_timeout expires). Note that beginVideoStream()
 	// implies creation of a new VideoStream as well, but newVideoStream()
-	// callback is not called in this cases because the initiative comes
+	// callback is not called in this case because the initiative comes
 	// from the outside.
 	//
 	// Called with GstStream::mutex held.
@@ -80,6 +80,7 @@ private:
     mt_const bool send_metadata;
     mt_const bool enable_prechunking;
     mt_const bool keep_video_stream;
+    mt_const bool continuous_playback;
 
     mt_const bool connect_on_demand;
     mt_const Time connect_on_demand_timeout;
@@ -220,6 +221,7 @@ public:
 			bool               send_metadata,
                         bool               enable_prechunking,
 			bool               keep_video_stream,
+                        bool               continuous_playback,
                         bool               connect_on_demand,
                         Time               connect_on_demand_timeout,
 			Uint64             default_width,

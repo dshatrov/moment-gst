@@ -25,21 +25,21 @@ using namespace Moment;
 
 namespace MomentGst {
 
-static LogGroup libMary_logGroup_chains   ("moment-gst_chains",   LogLevel::D);
-static LogGroup libMary_logGroup_pipeline ("moment-gst_pipeline", LogLevel::D);
-static LogGroup libMary_logGroup_stream   ("moment-gst_stream",   LogLevel::D);
-static LogGroup libMary_logGroup_bus      ("moment-gst_bus",      LogLevel::D);
+static LogGroup libMary_logGroup_chains   ("moment-gst_chains",   LogLevel::I);
+static LogGroup libMary_logGroup_pipeline ("moment-gst_pipeline", LogLevel::I);
+static LogGroup libMary_logGroup_stream   ("moment-gst_stream",   LogLevel::I);
+static LogGroup libMary_logGroup_bus      ("moment-gst_bus",      LogLevel::I);
 static LogGroup libMary_logGroup_frames   ("moment-gst_frames",   LogLevel::E); // E is the default
-static LogGroup libMary_logGroup_novideo  ("moment-gst_novideo",  LogLevel::D);
+static LogGroup libMary_logGroup_novideo  ("moment-gst_novideo",  LogLevel::I);
 
 void
 GstStream::workqueueThreadFunc (void * const _self)
 {
     GstStream * const self = static_cast <GstStream*> (_self);
 
-    logD (pipeline, _self_func_);
-
     updateTime ();
+
+    logD (pipeline, _self_func_);
 
     self->mutex.lock ();
 
@@ -692,6 +692,8 @@ GstStream::reportMetaData ()
     page_pool->msgUnref (msg.page_list.first);
 }
 
+#if 0
+// Moved to libmoment_gst
 static void
 dumpBufferFlags (GstBuffer * const buffer)
 {
@@ -756,6 +758,7 @@ dumpBufferFlags (GstBuffer * const buffer)
     if (flags)
 	log__ (_func, "Extra flags: 0x", fmt_hex, flags);
 }
+#endif
 
 static Ref<String>
 gstStateToString (GstState const state)
@@ -810,7 +813,7 @@ GstStream::doAudioData (GstBuffer * const buffer)
 	  "flags 0x", fmt_hex, GST_BUFFER_FLAGS (buffer), ", "
 	  "size: ", fmt_def, GST_BUFFER_SIZE (buffer));
     if (logLevelOn (frames, LogLevel::Debug)) {
-	dumpBufferFlags (buffer);
+	dumpGstBufferFlags (buffer);
 
 	if (GST_BUFFER_FLAG_IS_SET (buffer, GST_BUFFER_FLAG_IN_CAPS) ||
 	    GST_BUFFER_TIMESTAMP (buffer) == (GstClockTime) -1)
@@ -1162,7 +1165,7 @@ GstStream::doVideoData (GstBuffer * const buffer)
           " (", fmt_def, GST_BUFFER_TIMESTAMP (buffer), "), "
 	  "flags 0x", fmt_hex, GST_BUFFER_FLAGS (buffer));
     if (logLevelOn (frames, LogLevel::Debug))
-	dumpBufferFlags (buffer);
+	dumpGstBufferFlags (buffer);
 
     if (GST_BUFFER_FLAG_IS_SET (buffer, GST_BUFFER_FLAG_PREROLL))
 	logD (frames, _func, "preroll buffer");
@@ -1715,6 +1718,7 @@ GstStream::mixStreamVideoMessage (VideoStream::VideoMessage * const mt_nonnull v
 	    logD_ (_func, "non-prechunked data");
 
 	    normalized_pages = video_msg->page_list;
+            normalized_offset = video_msg->msg_offset;
 	    unref_normalized_pages = false;
 	} else {
 	    logD_ (_func, "prechunked data");

@@ -82,6 +82,8 @@ static void doMomentGstInit ()
 	    return;
 	}
 
+// TODO Honour gst_debug
+#if 0
 	if (gst_debug == MConfig::Boolean_True) {
 	  // Initialization with gstreamer debugging output enabled.
 
@@ -97,6 +99,9 @@ static void doMomentGstInit ()
 	} else {
 	    gst_init (NULL /* argc */, NULL /* argv */);
 	}
+#endif
+
+        libMomentGstInit ();
     }
 
     if (!gst_module->init (MomentServer::getInstance()))
@@ -138,6 +143,8 @@ static void momentGstUnload ()
 
 } // namespace MomentGst
 
+
+#include <libmary/module_init.h>
 
 namespace M {
 
