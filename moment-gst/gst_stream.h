@@ -35,6 +35,9 @@ using namespace Moment;
 
 class GstStream : public Object
 {
+private:
+    StateMutex mutex;
+
 public:
     struct Frontend {
 	void (*error) (void *cb_data);

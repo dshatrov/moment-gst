@@ -37,6 +37,8 @@ using namespace Moment;
 class MomentGstModule : public Object
 {
 private:
+    StateMutex mutex;
+
     class ChannelEntry : public HashEntry<>
     {
     public:
@@ -180,6 +182,7 @@ private:
     void parseSourcesConfigSection ();
     void parseChainsConfigSection ();
     Result parseStreamsConfigSection ();
+    Result parseStreams ();
     void parseRecordingsConfigSection ();
 
 public:

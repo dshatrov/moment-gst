@@ -34,6 +34,9 @@ using namespace Moment;
 
 class Channel : public Object
 {
+private:
+    StateMutex mutex;
+
 public:
     struct ChannelEvents
     {

@@ -36,6 +36,9 @@ using namespace Moment;
 
 class GstStreamCtl : public Object
 {
+private:
+    StateMutex mutex;
+
 public:
     struct Frontend
     {

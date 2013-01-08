@@ -1675,6 +1675,47 @@ MomentGstModule::parseStreamsConfigSection ()
     return Result::Success;
 }
 
+Result
+MomentGstModule::parseStreams ()
+{
+    MConfig::Config * const config = moment->getConfig();
+
+    logD_ (_func_);
+
+    MConfig::Section * const gst_section = config->getSection ("mod_gst");
+    if (!gst_section)
+        return Result::Success;
+
+    MConfig::Section::iterator gst_section_iter (*gst_section);
+    while (!gst_section_iter.done()) {
+        MConfig::SectionEntry * const gst_section_entry = gst_section_iter.next ();
+        if (gst_section_entry->getType() == MConfig::SectionEntry::Type_Section) {
+            MConfig::Section * const section = static_cast <MConfig::Section*> (gst_section_entry);
+            if (!equal (section->getName(), "stream"))
+                continue;
+
+            ConstMemory stream_name;
+            {
+                MConfig::Section::attribute_iterator attr_iter (*section);
+                if (!attr_iter.done()) {
+                    MConfig::Attribute * const attr = attr_iter.next ();
+                    if (!attr->hasValue())
+                        stream_name = attr->getName();
+                }
+            }
+
+            if (MConfig::Attribute * const attr = section->getAttribute ("name"))
+                stream_name = attr->getValue ();
+
+            if (!stream_name.isNull()) {
+                logD_ (_func, "--- STREAM NAME: ", stream_name);
+            }
+        }
+    }
+
+    return Result::Success;
+}
+
 void
 MomentGstModule::parseRecordingsConfigSection ()
 {
@@ -1933,6 +1974,7 @@ MomentGstModule::init (MomentServer * const moment)
 	    1 << 20 /* 1 Mb */ /* preassembly_limit */,
 	    true    /* parse_body_params */);
 
+    // Deprecated in favor of "mod_gst" prefix.
     moment->getHttpService()->addHttpHandler (
 	    CbDesc<HttpService::HttpHandler> (
 		    &http_handler, this /* cb_data */, NULL /* coderef_container */),
@@ -1941,10 +1983,22 @@ MomentGstModule::init (MomentServer * const moment)
 	    1 << 20 /* 1 Mb */ /* preassembly_limit */,
 	    true /* parse_body_params */);
 
+    // Alias to "moment_gst"
+    moment->getHttpService()->addHttpHandler (
+	    CbDesc<HttpService::HttpHandler> (
+		    &http_handler, this /* cb_data */, NULL /* coderef_container */),
+	    "mod_gst",
+	    true /* preassembly */,
+	    1 << 20 /* 1 Mb */ /* preassembly_limit */,
+	    true /* parse_body_params */);
+
     parseSourcesConfigSection ();
     parseChainsConfigSection ();
 
     if (!parseStreamsConfigSection ())
+        return Result::Failure;
+
+    if (!parseStreams ())
         return Result::Failure;
 
     parseRecordingsConfigSection ();

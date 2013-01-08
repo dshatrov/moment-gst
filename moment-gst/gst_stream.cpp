@@ -634,6 +634,11 @@ GstStream::releasePipeline ()
 {
     logD (pipeline, _this_func_);
 
+//#error Two bugs here:
+//#error   1. If the pipeline is being released (got an item in the workqueue),
+//#error      then we should wait for the thread to join, but we don't.
+//#error   2. Simultaneous joining of the same thread is undefined behavior.
+
     mutex.lock ();
 
     while (!workqueue_list.isEmpty()) {

@@ -685,7 +685,7 @@ Playlist::parsePlaylistFile (ConstMemory   const filename,
     xmlDocPtr doc = xmlReadFile ((char const *) filename_cstr, NULL /* encoding */, XML_PARSE_NONET);
     if (!doc) {
 	reportXmlParsingError (filename, ret_err_msg);
-	exc_throw<InternalException> (InternalException::BackendError);
+	exc_throw (InternalException, InternalException::BackendError);
 	return Result::Failure;
     }
 
@@ -703,7 +703,7 @@ Playlist::parsePlaylistMem (ConstMemory   const mem,
 	    (char const *) mem.mem(), mem.len(), "" /* URL */, NULL /* encoding */, XML_PARSE_NONET);
     if (!doc) {
 	reportXmlParsingError (ConstMemory() /* filename */, ret_err_msg);
-	exc_throw<InternalException> (InternalException::BackendError);
+	exc_throw (InternalException, InternalException::BackendError);
 	return Result::Failure;
     }
 

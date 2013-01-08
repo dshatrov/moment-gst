@@ -46,6 +46,7 @@ static void serverDestroy (void * const _gst_module)
 }
 
 static MomentServer::Events const server_events = {
+    NULL /* configReload */,
     serverDestroy
 };
 
