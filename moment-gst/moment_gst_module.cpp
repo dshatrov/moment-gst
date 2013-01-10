@@ -18,6 +18,7 @@
 
 
 #include <libmary/types.h>
+#include <cctype>
 #include <gst/gst.h>
 
 #include <moment/libmoment.h>
@@ -66,8 +67,9 @@ using namespace Moment;
 
 namespace MomentGst {
 
-static Ref<String> this_rtmpt_server_addr;
-static Ref<String> this_hls_server_addr;
+static StRef<String> this_rtmp_server_addr;
+static StRef<String> this_rtmpt_server_addr;
+static StRef<String> this_hls_server_addr;
 
 Result
 MomentGstModule::updatePlaylist (ConstMemory   const channel_name,
@@ -158,6 +160,7 @@ MomentGstModule::setPosition (ConstMemory const channel_name,
 
 void
 MomentGstModule::createPlaylistChannel (ConstMemory   const channel_name,
+                                        ConstMemory   const channel_title,
 					ConstMemory   const channel_desc,
 					ConstMemory   const playlist_filename,
                                         bool          const no_audio,
@@ -170,8 +173,9 @@ MomentGstModule::createPlaylistChannel (ConstMemory   const channel_name,
 {
     ChannelEntry * const channel_entry = new ChannelEntry;
 
-    channel_entry->channel_name = grab (new String (channel_name));
-    channel_entry->channel_desc = grab (new String (channel_desc));
+    channel_entry->channel_name  = grab (new String (channel_name));
+    channel_entry->channel_title = grab (new String (channel_title));
+    channel_entry->channel_desc  = grab (new String (channel_desc));
     channel_entry->playlist_filename = grab (new String (playlist_filename));
 
     channel_entry->push_agent = push_agent;
@@ -212,6 +216,7 @@ MomentGstModule::createPlaylistChannel (ConstMemory   const channel_name,
 
 void
 MomentGstModule::createStreamChannel (ConstMemory   const channel_name,
+                                      ConstMemory   const channel_title,
 				      ConstMemory   const channel_desc,
 				      ConstMemory   const stream_spec,
 				      bool          const is_chain,
@@ -227,8 +232,9 @@ MomentGstModule::createStreamChannel (ConstMemory   const channel_name,
 
     ChannelEntry * const channel_entry = new ChannelEntry;
 
-    channel_entry->channel_name = grab (new String (channel_name));
-    channel_entry->channel_desc = grab (new String (channel_desc));
+    channel_entry->channel_name  = grab (new String (channel_name));
+    channel_entry->channel_title = grab (new String (channel_title));
+    channel_entry->channel_desc  = grab (new String (channel_desc));
     channel_entry->playlist_filename = NULL;
 
     channel_entry->push_agent = push_agent;
@@ -265,13 +271,15 @@ MomentGstModule::createStreamChannel (ConstMemory   const channel_name,
 
 void
 MomentGstModule::createDummyChannel (ConstMemory   const channel_name,
+                                     ConstMemory   const channel_title,
 				     ConstMemory   const channel_desc,
                                      PushAgent   * const push_agent)
 {
     ChannelEntry * const channel_entry = new ChannelEntry;
 
-    channel_entry->channel_name = grab (new String (channel_name));
-    channel_entry->channel_desc = grab (new String (channel_desc));
+    channel_entry->channel_name  = grab (new String (channel_name));
+    channel_entry->channel_title = grab (new String (channel_title));
+    channel_entry->channel_desc  = grab (new String (channel_desc));
     channel_entry->playlist_filename = NULL;
 
     channel_entry->push_agent = push_agent;
@@ -565,13 +573,19 @@ MomentGstModule::adminHttpRequest (HttpRequest  * const mt_nonnull req,
 
 	// "src_" prefix indicates that only one of these parameters can be
 	// specified at a time.
+        ConstMemory       src_title    = req->getParameter ("src_title");
 	ConstMemory const src_chain    = req->getParameter ("src_chain");
 	ConstMemory const src_path     = req->getParameter ("src_path");
 	ConstMemory const src_uri      = req->getParameter ("src_uri");
 	ConstMemory const src_playlist = req->getParameter ("src_playlist");
 
+        if (src_title.len() == 0)
+            src_title = channel_name;
+
 	{
 	    logD_ (_func, "set_channel:");
+            if (src_title.len())
+                logD_ (_func, "    src_title: ", src_title);
 	    if (src_chain.len())
 		logD_ (_func, "    src_chain: ", src_chain);
 	    if (src_path.len())
@@ -606,6 +620,7 @@ MomentGstModule::adminHttpRequest (HttpRequest  * const mt_nonnull req,
 
 	if (src_chain.len()) {
 	    self->createStreamChannel (channel_name,
+                                       src_title,
 				       ConstMemory() /* channel_desc */,
 				       src_chain,
 				       true /* is_chain */,
@@ -618,6 +633,7 @@ MomentGstModule::adminHttpRequest (HttpRequest  * const mt_nonnull req,
 	} else
 	if (src_path.len()) {
 	    self->createStreamChannel (channel_name,
+                                       src_title,
 				       ConstMemory() /* channel_desc */,
 				       makeString ("file://", src_path)->mem(),
 				       false /* is_chain */,
@@ -630,6 +646,7 @@ MomentGstModule::adminHttpRequest (HttpRequest  * const mt_nonnull req,
 	} else
 	if (src_uri.len()) {
 	    self->createStreamChannel (channel_name,
+                                       src_title,
 				       ConstMemory() /* channel_desc */,
 				       src_uri,
 				       false /* is_chain */,
@@ -642,6 +659,7 @@ MomentGstModule::adminHttpRequest (HttpRequest  * const mt_nonnull req,
 	} else
 	if (src_playlist.len()) {
 	    self->createPlaylistChannel (channel_name,
+                                         src_title,
 					 ConstMemory() /* channel_desc */,
 					 src_playlist,
                                          false /* no_audio */,
@@ -915,6 +933,60 @@ MomentGstModule::httpRequest (HttpRequest  * const mt_nonnull req,
     MOMENT_GST__HEADERS_DATE
 
     if (req->getNumPathElems() >= 2
+        && equal (req->getPath (1), "playlist.json"))
+    {
+        PagePool::PageListHead page_list;
+
+        static char const prefix [] = "[\n";
+        static char const suffix [] = "]\n";
+
+        self->page_pool->getFillPages (&page_list, prefix);
+
+        self->mutex.lock ();
+	{
+            bool use_rtmpt_proto = false;
+            if (equal (self->playlist_json_protocol->mem(), "rtmpt"))
+                use_rtmpt_proto = true;
+
+	    ChannelEntryHash::iterator iter (self->channel_entry_hash);
+	    while (!iter.done()) {
+		ChannelEntry * const channel_entry = iter.next ();
+
+		StRef<String> const channel_line = st_makeString (
+                        "[ \"", (channel_entry->channel_title ? channel_entry->channel_title->mem() :
+                                                                channel_entry->channel_name->mem()), "\", "
+                        "\"", (use_rtmpt_proto ? ConstMemory ("rtmpt://") : ConstMemory ("rtmp://")),
+                                (use_rtmpt_proto ? this_rtmpt_server_addr->mem() : this_rtmp_server_addr->mem()),
+                                "/live/", channel_entry->channel_name->mem(), "\", "
+                        "\"", channel_entry->channel_name->mem(), "\" ],\n");
+
+		self->page_pool->getFillPages (&page_list, channel_line->mem());
+
+                logD_ (_func, "playlist.json line: ", channel_line->mem());
+	    }
+	}
+        self->mutex.unlock ();
+
+        self->page_pool->getFillPages (&page_list, suffix);
+
+	Size content_len = 0;
+	{
+	    PagePool::Page *page = page_list.first;
+	    while (page) {
+		content_len += page->data_len;
+		page = page->getNextMsgPage();
+	    }
+	}
+
+	conn_sender->send (self->page_pool,
+			   false /* do_flush */,
+			   MOMENT_GST__OK_HEADERS ("text/html", content_len),
+			   "\r\n");
+	conn_sender->sendPages (self->page_pool, &page_list, true /* do_flush */);
+
+	logA_ ("mod_gst 200 ", req->getClientAddress(), " ", req->getRequestLine());
+    } else
+    if (req->getNumPathElems() >= 2
 	&& equal (req->getPath (1), "wall_hls"))
     {
 	PagePool::PageListHead page_list;
@@ -938,7 +1010,6 @@ MomentGstModule::httpRequest (HttpRequest  * const mt_nonnull req,
 	self->page_pool->getFillPages (&page_list, ConstMemory (prefix, sizeof (prefix) - 1));
 
 	self->mutex.lock ();
-
 	{
 	    ChannelEntryHash::iter iter (self->channel_entry_hash);
 	    unsigned row_cnt = 0;
@@ -999,7 +1070,6 @@ MomentGstModule::httpRequest (HttpRequest  * const mt_nonnull req,
 		self->page_pool->getFillPages (&page_list, ConstMemory (row_suffix, sizeof (row_suffix) - 1));
 	    }
 	}
-
 	self->mutex.unlock ();
 
 	self->page_pool->getFillPages (&page_list, ConstMemory (suffix, sizeof (suffix) - 1));
@@ -1058,7 +1128,7 @@ MomentGstModule::httpRequest (HttpRequest  * const mt_nonnull req,
 		    self->page_pool->getFillPages (&page_list, ConstMemory (row_prefix, sizeof (row_prefix) - 1));
 		}
 
-		Ref<String> const flashvars = makeString (
+		StRef<String> const flashvars = st_makeString (
 			"server=rtmpt://", this_rtmpt_server_addr->mem(),
 			"&stream=", channel_entry->channel_name->mem(),
 			"?paused&play_duration=20&buffer=0.0&shadow=0.4");
@@ -1213,6 +1283,7 @@ MomentGstModule::parseSourcesConfigSection ()
 	    logD_ (_func, "Stream name: ", stream_name, "; stream uri: ", stream_uri);
 
 	    createStreamChannel (stream_name,
+                                 stream_name,
 			         ConstMemory() /* channel_desc */,
 				 stream_uri,
 				 false /* is_chain */,
@@ -1296,6 +1367,7 @@ MomentGstModule::parseChainsConfigSection ()
 	    ConstMemory const chain_spec = chain_option->getValue()->mem();
 
 	    createStreamChannel (stream_name,
+                                 stream_name,
 			         ConstMemory() /* channel_desc */,
 				 chain_spec,
 				 true  /* is_chain */,
@@ -1363,6 +1435,7 @@ MomentGstModule::parseChainsConfigSection ()
 	    }
 
 	    createStreamChannel (stream_name,
+                                 stream_name,
 			         ConstMemory() /* channel_desc */,
 				 chain_spec,
 				 true  /* is_chain */,
@@ -1395,7 +1468,7 @@ MomentGstModule::parseStreamsConfigSection ()
 
 	    logD_ (_func, "section");
 
-	    Ref<String> stream_name;
+	    StRef<String> stream_name;
 	    {
 		MConfig::Option * const opt = item_section->getOption ("name");
 		if (opt && opt->getValue()) {
@@ -1403,13 +1476,25 @@ MomentGstModule::parseStreamsConfigSection ()
 		    logD_ (_func, "stream_name: ", stream_name);
 		}
 
-		if (stream_name.isNull()) {
+		if (!stream_name) {
 		    logW_ (_func, "Unnamed stream in section mod_gst/streams");
-		    stream_name = grab (new String);
+		    stream_name = st_grab (new (std::nothrow) String);
 		}
 	    }
 
-	    Ref<String> channel_desc;
+            StRef<String> channel_title;
+            {
+                MConfig::Option * const opt = item_section->getOption ("title");
+                if (opt && opt->getValue()) {
+                    channel_title = opt->getValue()->getAsString();
+                    logD_ (_func, "channel_title: ", channel_title);
+                }
+
+                if (!channel_title)
+                    channel_title = stream_name;
+            }
+
+	    StRef<String> channel_desc;
 	    {
 		MConfig::Option * const opt = item_section->getOption ("desc");
 		if (opt && opt->getValue()) {
@@ -1417,13 +1502,13 @@ MomentGstModule::parseStreamsConfigSection ()
 		    logD_ (_func, "channel_desc: ", channel_desc);
 		}
 
-		if (channel_desc.isNull())
-		    channel_desc = grab (new String);
+		if (!channel_desc)
+		    channel_desc = st_grab (new (std::nothrow) String);
 	    }
 
-	    Ref<String> chain;
-	    Ref<String> uri;
-	    Ref<String> playlist;
+	    StRef<String> chain;
+	    StRef<String> uri;
+	    StRef<String> playlist;
 	    {
 		int num_set_opts = 0;
 
@@ -1460,7 +1545,7 @@ MomentGstModule::parseStreamsConfigSection ()
 		}
 	    }
 
-	    Ref<String> record_path;
+	    StRef<String> record_path;
 	    {
 		MConfig::Option * const opt = item_section->getOption ("record_path");
 		if (opt && opt->getValue()) {
@@ -1547,7 +1632,7 @@ MomentGstModule::parseStreamsConfigSection ()
                 }
 #endif
 
-                Ref<String> push_username;
+                StRef<String> push_username;
                 {
                     ConstMemory const opt_name = "push_username";
                     MConfig::Option * const opt = item_section->getOption (opt_name);
@@ -1555,11 +1640,11 @@ MomentGstModule::parseStreamsConfigSection ()
                         push_username = opt->getValue()->getAsString();
                         logD_ (_func, opt_name, ": ", push_username);
                     } else {
-                        push_username = grab (new String);
+                        push_username = st_grab (new (std::nothrow) String);
                     }
                 }
 
-                Ref<String> push_password;
+                StRef<String> push_password;
                 {
                     ConstMemory const opt_name = "push_password";
                     MConfig::Option * const opt = item_section->getOption (opt_name);
@@ -1567,7 +1652,7 @@ MomentGstModule::parseStreamsConfigSection ()
                         push_password = opt->getValue()->getAsString();
                         logD_ (_func, opt_name, ": ", push_password);
                     } else {
-                        push_password = grab (new String);
+                        push_password = st_grab (new (std::nothrow) String);
                     }
                 }
 
@@ -1628,6 +1713,7 @@ MomentGstModule::parseStreamsConfigSection ()
 
 	    if (chain && !chain->isNull()) {
 		createStreamChannel (stream_name->mem(),
+                                     channel_title->mem(),
 				     channel_desc->mem(),
 				     chain->mem(),
 				     true /* is_chain */,
@@ -1641,6 +1727,7 @@ MomentGstModule::parseStreamsConfigSection ()
 	    } else
 	    if (uri && !uri->isNull()) {
 		createStreamChannel (stream_name->mem(),
+                                     channel_title->mem(),
 				     channel_desc->mem(),
 				     uri->mem(),
 				     false /* is_chain */,
@@ -1655,6 +1742,7 @@ MomentGstModule::parseStreamsConfigSection ()
 	    if (playlist && !playlist->isNull()) {
 		logD_ (_func, "playlist: ", playlist);
 		createPlaylistChannel (stream_name->mem(),
+                                       channel_title->mem(),
 				       channel_desc->mem(),
 				       playlist->mem(),
                                        no_audio,
@@ -1666,7 +1754,7 @@ MomentGstModule::parseStreamsConfigSection ()
                                        push_agent);
 	    } else {
 		logW_ (_func, "None of chain/uri/playlist specified for stream \"", stream_name, "\"");
-		createDummyChannel (stream_name->mem(), channel_desc->mem(), push_agent);
+		createDummyChannel (stream_name->mem(), channel_title->mem(), channel_desc->mem(), push_agent);
 	    }
 
 	}
@@ -1941,13 +2029,60 @@ MomentGstModule::init (MomentServer * const moment)
     }
 
     {
+        ConstMemory const opt_name = "mod_gst/playlist_json";
+        MConfig::BooleanValue const val = config->getBoolean (opt_name);
+        logI_ (_func, opt_name, ": ", config->getString (opt_name));
+        if (val == MConfig::Boolean_Invalid) {
+            logE_ (_func, "Invalid value for ", opt_name, ": ", config->getString (opt_name));
+            return Result::Failure;
+        }
+
+        if (val == MConfig::Boolean_False)
+            serve_playlist_json = false;
+        else
+            serve_playlist_json = true;
+    }
+
+    {
+        ConstMemory const opt_name = "mod_gst/playlist_json_protocol";
+        ConstMemory opt_val = config->getString (opt_name);
+        if (opt_val.len() == 0)
+            opt_val = "rtmp";
+
+        StRef<String> val_lowercase = st_grab (new (std::nothrow) String (opt_val));
+        Byte * const buf = val_lowercase->mem().mem();
+        for (Size i = 0, i_end = val_lowercase->len(); i < i_end; ++i)
+            buf [i] = (Byte) tolower (buf [i]);
+
+        if (!equal (val_lowercase->mem(), "rtmpt"))
+            val_lowercase = st_grab (new (std::nothrow) String ("rtmp"));
+
+        logI_ (_func, opt_name, ": ", val_lowercase->mem());
+
+        playlist_json_protocol = val_lowercase;
+    }
+
+    {
+	ConstMemory const opt_name = "moment/this_rtmp_server_addr";
+	ConstMemory const opt_val = config->getString (opt_name);
+	logI_ (_func, opt_name, ": ", opt_val);
+	if (!opt_val.isNull()) {
+	    this_rtmp_server_addr = st_grab (new (std::nothrow) String (opt_val));
+	} else {
+	    this_rtmp_server_addr = st_grab (new (std::nothrow) String ("127.0.0.1:1935"));
+	    logI_ (_func, opt_name, " config parameter is not set. "
+		   "Defaulting to ", this_rtmpt_server_addr);
+	}
+    }
+
+    {
 	ConstMemory const opt_name = "moment/this_rtmpt_server_addr";
 	ConstMemory const opt_val = config->getString (opt_name);
 	logI_ (_func, opt_name, ": ", opt_val);
 	if (!opt_val.isNull()) {
-	    this_rtmpt_server_addr = grab (new String (opt_val));
+	    this_rtmpt_server_addr = st_grab (new (std::nothrow) String (opt_val));
 	} else {
-	    this_rtmpt_server_addr = grab (new String ("127.0.0.1:8081"));
+	    this_rtmpt_server_addr = st_grab (new (std::nothrow) String ("127.0.0.1:8080"));
 	    logI_ (_func, opt_name, " config parameter is not set. "
 		   "Defaulting to ", this_rtmpt_server_addr);
 	}
@@ -1958,9 +2093,9 @@ MomentGstModule::init (MomentServer * const moment)
 	ConstMemory const opt_val = config->getString (opt_name);
 	logI_ (_func, opt_name, ": ", opt_val);
 	if (!opt_val.isNull()) {
-	    this_hls_server_addr = grab (new String (opt_val));
+	    this_hls_server_addr = st_grab (new (std::nothrow) String (opt_val));
 	} else {
-	    this_hls_server_addr = grab (new String ("127.0.0.1:8080"));
+	    this_hls_server_addr = st_grab (new (std::nothrow) String ("127.0.0.1:8080"));
 	    logI_ (_func, opt_name, " config parameter is not set. "
 		   "Defaulting to ", this_hls_server_addr);
 	}
@@ -2016,6 +2151,7 @@ MomentGstModule::MomentGstModule()
       continuous_playback (true),
       default_connect_on_demand (false),
       default_connect_on_demand_timeout (60),
+      serve_playlist_json (false),
       default_width (0),
       default_height (0),
       default_bitrate (500000),

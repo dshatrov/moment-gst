@@ -45,6 +45,7 @@ private:
 	mt_const Ref<Channel> channel;
 
 	mt_const Ref<String> channel_name;
+        mt_const Ref<String> channel_title;
 	mt_const Ref<String> channel_desc;
 	mt_const Ref<String> playlist_filename;
 
@@ -94,6 +95,8 @@ private:
     mt_const bool continuous_playback;
     mt_const bool default_connect_on_demand;
     mt_const Time default_connect_on_demand_timeout;
+    mt_const bool serve_playlist_json;
+    mt_const StRef<String> playlist_json_protocol;
 
     mt_const Uint64 default_width;
     mt_const Uint64 default_height;
@@ -145,6 +148,7 @@ private:
     mt_end
 
     void createPlaylistChannel (ConstMemory  channel_name,
+                                ConstMemory  channel_title,
 				ConstMemory  channel_desc,
 				ConstMemory  playlist_filename,
                                 bool         no_audio,
@@ -156,6 +160,7 @@ private:
                                 PushAgent   *push_agent = NULL);
 
     void createStreamChannel (ConstMemory  stream_name,
+                              ConstMemory  channel_title,
 			      ConstMemory  channel_desc,
 			      ConstMemory  stream_spec,
 			      bool         is_chain,
@@ -168,6 +173,7 @@ private:
                               PushAgent   *push_agent = NULL);
 
     void createDummyChannel (ConstMemory  channel_name,
+                             ConstMemory  channel_title,
 			     ConstMemory  channel_desc,
                              PushAgent   *push_agent = NULL);
 
