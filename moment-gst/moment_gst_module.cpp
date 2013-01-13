@@ -545,7 +545,11 @@ MomentGstModule::httpGetChannelsStat (HttpRequest  * const mt_nonnull req,
 		       "\r\n");
     conn_sender->sendPages (self->page_pool, &page_list, true /* do_flush */);
 
+    if (!req->getKeepalive())
+        conn_sender->closeAfterFlush();
+
     logA_ ("mod_gst 200 ", req->getClientAddress(), " ", req->getRequestLine());
+
     return Result::Success;
 }
 
@@ -691,17 +695,16 @@ MomentGstModule::adminHttpRequest (HttpRequest  * const mt_nonnull req,
 			       err_msg->mem());
 
 	    logA_ ("gst_admin 500 ", req->getClientAddress(), " ", req->getRequestLine());
-	    goto _return;
-	}
+	} else {
+            ConstMemory const reply_body = "OK";
+            conn_sender->send (self->page_pool,
+                               true /* do_flush */,
+                               MOMENT_GST__OK_HEADERS ("text/plain", reply_body.len()),
+                               "\r\n",
+                               reply_body);
 
-	ConstMemory const reply_body = "OK";
-	conn_sender->send (self->page_pool,
-			   true /* do_flush */,
-			   MOMENT_GST__OK_HEADERS ("text/plain", reply_body.len()),
-			   "\r\n",
-			   reply_body);
-
-	logA_ ("gst_admin 200 ", req->getClientAddress(), " ", req->getRequestLine());
+            logA_ ("gst_admin 200 ", req->getClientAddress(), " ", req->getRequestLine());
+        }
     } else
     if (req->getNumPathElems() == 5
 	&& (equal (req->getPath (1), "set_position") ||
@@ -721,17 +724,16 @@ MomentGstModule::adminHttpRequest (HttpRequest  * const mt_nonnull req,
 			       reply_body);
 
 	    logA_ ("gst_admin 500 ", req->getClientAddress(), " ", req->getRequestLine());
-	    goto _return;
-	}
+	} else {
+            ConstMemory const reply_body = "OK";
+            conn_sender->send (self->page_pool,
+                               true /* do_flush */,
+                               MOMENT_GST__OK_HEADERS ("text/plain", reply_body.len()),
+                               "\r\n",
+                               reply_body);
 
-	ConstMemory const reply_body = "OK";
-	conn_sender->send (self->page_pool,
-			   true /* do_flush */,
-			   MOMENT_GST__OK_HEADERS ("text/plain", reply_body.len()),
-			   "\r\n",
-			   reply_body);
-
-	logA_ ("gst_admin 200 ", req->getClientAddress(), " ", req->getRequestLine());
+            logA_ ("gst_admin 200 ", req->getClientAddress(), " ", req->getRequestLine());
+        }
     } else
     if (req->getNumPathElems() >= 2
 	&& equal (req->getPath (1), "channel_info"))
@@ -894,7 +896,9 @@ _channel_reconnect__done:
 	logA_ ("gst_admin 404 ", req->getClientAddress(), " ", req->getRequestLine());
     }
 
-_return:
+    if (!req->getKeepalive())
+        conn_sender->closeAfterFlush();
+
     return Result::Success;
 
 _bad_request:
@@ -907,9 +911,10 @@ _bad_request:
 		MOMENT_GST__400_HEADERS (reply_body.len()),
 		"\r\n",
 		reply_body);
-	if (!req->getKeepalive())
-	    conn_sender->closeAfterFlush();
     }
+
+    if (!req->getKeepalive())
+        conn_sender->closeAfterFlush();
 
     return Result::Success;
 }
@@ -1233,6 +1238,9 @@ MomentGstModule::httpRequest (HttpRequest  * const mt_nonnull req,
 
 	logA_ ("gst_admin 404 ", req->getClientAddress(), " ", req->getRequestLine());
     }
+
+    if (!req->getKeepalive())
+        conn_sender->closeAfterFlush();
 
     return Result::Success;
 
