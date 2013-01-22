@@ -58,6 +58,8 @@ public:
 	Ref<String> chain_spec;
 	Ref<String> uri;
 
+        bool force_transcode;
+
 	Ref<String> id;
 
 	void reset ()
@@ -73,6 +75,8 @@ public:
 	    duration_default = true;
 
 	    seek = 0;
+
+            force_transcode = false;
 	}
 
 	Item ()
@@ -124,7 +128,8 @@ public:
     void clear ();
 
     void setSingleItem (ConstMemory stream_spec,
-			bool        is_chain);
+			bool        is_chain,
+                        bool        force_transcode);
 
     void setSingleChannelRecorder (ConstMemory channel_name);
 

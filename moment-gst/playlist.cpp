@@ -654,9 +654,12 @@ static void reportXmlParsingError (ConstMemory   const filename,
 
 void
 Playlist::setSingleItem (ConstMemory const stream_spec,
-			 bool        const is_chain)
+			 bool        const is_chain,
+                         bool        const force_transcode)
 {
-    Item * const item = new Item;
+    Item * const item = new (std::nothrow) Item;
+    assert (item);
+    item->force_transcode = force_transcode;
 
     if (is_chain)
 	item->chain_spec = grab (new String (stream_spec));

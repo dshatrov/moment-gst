@@ -1,5 +1,5 @@
 /*  Moment-Gst - GStreamer support module for Moment Video Server
-    Copyright (C) 2011 Dmitry Shatrov
+    Copyright (C) 2011-2013 Dmitry Shatrov
 
     This program is free software; you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -30,10 +30,10 @@ static LogGroup libMary_logGroup_ctl ("mod_gst/GstStreamCtl", LogLevel::D);
 void
 GstStreamCtl::setStreamParameters (VideoStream * const mt_nonnull video_stream)
 {
-    Ref<StreamParameters> const stream_params = grab (new StreamParameters);
-    if (no_audio)
+    Ref<StreamParameters> const stream_params = grab (new (std::nothrow) StreamParameters);
+    if (channel_opts->no_audio)
         stream_params->setParam ("no_audio", "true");
-    if (no_video)
+    if (channel_opts->no_video)
         stream_params->setParam ("no_video", "true");
 
     video_stream->setStreamParameters (stream_params);
@@ -67,14 +67,15 @@ GstStreamCtl::numWatchersChanged (Count   const num_watchers,
     stream_data->num_watchers = num_watchers;
 
     if (num_watchers == 0) {
+#warning TODO    if (!channel_opts->connect_on_demand || stream_stopped)
         if (!self->connect_on_demand_timer) {
-            logD_ (_func, "starting timer, timeout: ", self->connect_on_demand_timeout);
+            logD_ (_func, "starting timer, timeout: ", self->channel_opts->connect_on_demand_timeout);
             self->connect_on_demand_timer = self->timers->addTimer (
                     CbDesc<Timers::TimerCallback> (connectOnDemandTimerTick,
                                                    stream_data /* cb_data */,
                                                    self        /* coderef_container */,
                                                    stream_data /* ref_data */),
-                    self->connect_on_demand_timeout,
+                    self->channel_opts->connect_on_demand_timeout,
                     false /* periodical */);
         }
     } else {
@@ -124,7 +125,7 @@ GstStreamCtl::beginConnectOnDemand (bool const start_timer)
 {
     assert (video_stream);
 
-    if (!connect_on_demand || stream_stopped)
+    if (!channel_opts->connect_on_demand || stream_stopped)
         return;
 
     video_stream->lock ();
@@ -132,13 +133,13 @@ GstStreamCtl::beginConnectOnDemand (bool const start_timer)
     if (start_timer
         && video_stream->getNumWatchers_unlocked() == 0)
     {
-        logD_ (_func, "starting timer, timeout: ", connect_on_demand_timeout);
+        logD_ (_func, "starting timer, timeout: ", channel_opts->connect_on_demand_timeout);
         connect_on_demand_timer = timers->addTimer (
                 CbDesc<Timers::TimerCallback> (connectOnDemandTimerTick,
                                                cur_stream_data /* cb_data */,
                                                this        /* coderef_container */,
                                                cur_stream_data /* ref_data */),
-                connect_on_demand_timeout,
+                channel_opts->connect_on_demand_timeout,
                 false /* periodical */);
     }
 
@@ -170,7 +171,7 @@ GstStreamCtl::createStream (Time const initial_seek)
     got_video = false;
 
     if (!cur_stream_data) {
-        Ref<StreamData> const stream_data = grab (new StreamData (
+        Ref<StreamData> const stream_data = grab (new (std::nothrow) StreamData (
                 this, stream_ticket, stream_ticket_ref.ptr()));
         cur_stream_data = stream_data;
     }
@@ -181,16 +182,16 @@ GstStreamCtl::createStream (Time const initial_seek)
     }
 
     if (!video_stream) {
-	video_stream = grab (new VideoStream);
+	video_stream = grab (new (std::nothrow) VideoStream);
         setStreamParameters (video_stream);
 
-	logD_ (_func, "Calling moment->addVideoStream, stream_name: ", stream_name->mem());
-	video_stream_key = moment->addVideoStream (video_stream, stream_name->mem());
+	logD_ (_func, "Calling moment->addVideoStream, stream_name: ", channel_opts->channel_name->mem());
+	video_stream_key = moment->addVideoStream (video_stream, channel_opts->channel_name->mem());
     }
 
     Ref<VideoStream> bind_stream = video_stream;
-    if (continuous_playback) {
-        bind_stream = grab (new VideoStream);
+    if (channel_opts->continuous_playback) {
+        bind_stream = grab (new (std::nothrow) VideoStream);
         video_stream->bindToStream (bind_stream, bind_stream, true, true);
     }
 
@@ -199,21 +200,29 @@ GstStreamCtl::createStream (Time const initial_seek)
     if (stream_start_time == 0)
 	stream_start_time = getTime();
 
-    gst_stream = grab (new GstStream);
-    gst_stream->init (stream_name->mem(),
+    gst_stream = grab (new (std::nothrow) GstStream);
+    gst_stream->init (
+#if 0
+                      stream_name->mem(),
 		      stream_spec->mem(),
 		      is_chain,
+                      force_transcode,
+#endif
 		      timers,
 		      page_pool,
 		      bind_stream,
 		      moment->getMixVideoStream(),
 		      initial_seek,
+                      channel_opts
+#if 0
 		      send_metadata,
                       enable_prechunking,
 		      default_width,
 		      default_height,
 		      default_bitrate,
-		      no_video_timeout);
+		      no_video_timeout
+#endif
+                      );
 
     gst_stream->setFrontend (CbDesc<GstStream::Frontend> (
 	    &gst_stream_frontend,
@@ -275,8 +284,8 @@ GstStreamCtl::closeStream (bool const replace_video_stream)
 
     if (video_stream
         && replace_video_stream
-	&& !keep_video_stream
-        && !continuous_playback)
+	&& !channel_opts->keep_video_stream
+        && !channel_opts->continuous_playback)
     {
 	// TODO moment->replaceVideoStream() to swap video streams atomically
 	moment->removeVideoStream (video_stream_key);
@@ -293,16 +302,16 @@ GstStreamCtl::closeStream (bool const replace_video_stream)
             {
                 assert (!cur_stream_data);
 
-                Ref<StreamData> const stream_data = grab (new StreamData (
+                Ref<StreamData> const stream_data = grab (new (std::nothrow) StreamData (
                         this, stream_ticket, stream_ticket_ref.ptr()));
                 cur_stream_data = stream_data;
             }
 
-	    video_stream = grab (new VideoStream);
+	    video_stream = grab (new (std::nothrow) VideoStream);
             setStreamParameters (video_stream);
 
-	    logD_ (_func, "Calling moment->addVideoStream, stream_name: ", stream_name->mem());
-	    video_stream_key = moment->addVideoStream (video_stream, stream_name->mem());
+	    logD_ (_func, "Calling moment->addVideoStream, stream_name: ", channel_opts->channel_name->mem());
+	    video_stream_key = moment->addVideoStream (video_stream, channel_opts->channel_name->mem());
 
 // This seems to be unnecessary here.
 //            // FIXME Connect on demand is not resumed if we don't get here. Bug.
@@ -476,6 +485,7 @@ GstStreamCtl::streamStatusEvent (void * const _stream_data)
 void
 GstStreamCtl::beginVideoStream (ConstMemory      const stream_spec,
 				bool             const is_chain,
+                                bool             const force_transcode,
 				void           * const stream_ticket,
 				VirtReferenced * const stream_ticket_ref,
 				Time             const seek)
@@ -487,8 +497,9 @@ GstStreamCtl::beginVideoStream (ConstMemory      const stream_spec,
     if (gst_stream)
 	closeStream (true /* replace_video_stream */);
 
-    this->stream_spec = grab (new String (stream_spec));
+    this->stream_spec = grab (new (std::nothrow) String (stream_spec));
     this->is_chain = is_chain;
+    this->force_transcode = force_transcode;
 
     this->stream_ticket = stream_ticket;
     this->stream_ticket_ref = stream_ticket_ref;
@@ -534,7 +545,7 @@ GstStreamCtl::isSourceOnline ()
 void
 GstStreamCtl::getTrafficStats (TrafficStats * const ret_traffic_stats)
 {
-  StateMutexLock l (mutex);
+  StateMutexLock l (&mutex);
 
     GstStream::TrafficStats stream_tstat;
     if (gst_stream)
@@ -557,7 +568,7 @@ GstStreamCtl::getTrafficStats (TrafficStats * const ret_traffic_stats)
 void
 GstStreamCtl::resetTrafficStats ()
 {
-  StateMutexLock l (mutex);
+  StateMutexLock l (&mutex);
 
     if (gst_stream)
 	gst_stream->resetTrafficStats ();
@@ -570,45 +581,17 @@ GstStreamCtl::resetTrafficStats ()
 }
 
 mt_const void
-GstStreamCtl::init (MomentServer      * const moment,
-		    DeferredProcessor * const deferred_processor,
-		    ConstMemory         const stream_name,
-                    bool                const no_audio,
-                    bool                const no_video,
-		    bool                const send_metadata,
-                    bool                const enable_prechunking,
-		    bool                const keep_video_stream,
-                    bool                const continuous_playback,
-                    bool                const connect_on_demand,
-                    Time                const connect_on_demand_timeout,
-		    Uint64              const default_width,
-		    Uint64              const default_height,
-		    Uint64              const default_bitrate,
-		    Time                const no_video_timeout)
+GstStreamCtl::init (MomentServer      * const mt_nonnull moment,
+		    DeferredProcessor * const mt_nonnull deferred_processor,
+                    ChannelOptions    * const mt_nonnull channel_opts)
 {
     logD (ctl, _this_func_);
 
     this->moment = moment;
-    this->timers = moment->getServerApp()->getServerContext()->getTimers();
+    this->timers = moment->getServerApp()->getServerContext()->getMainThreadContext()->getTimers();
     this->page_pool = moment->getPagePool();
 
-    this->stream_name = grab (new String (stream_name));
-
-    this->no_audio = no_audio;
-    this->no_video = no_video;
-    this->send_metadata = send_metadata;
-    this->enable_prechunking = enable_prechunking;
-    this->keep_video_stream = keep_video_stream;
-    this->continuous_playback = continuous_playback;
-
-    this->connect_on_demand = connect_on_demand;
-    this->connect_on_demand_timeout = connect_on_demand_timeout;
-
-    this->default_width = default_width;
-    this->default_height = default_height;
-    this->default_bitrate = default_bitrate;
-
-    this->no_video_timeout = no_video_timeout;
+    this->channel_opts = channel_opts;
 
     deferred_reg.setDeferredProcessor (deferred_processor);
 }
@@ -628,19 +611,6 @@ GstStreamCtl::GstStreamCtl ()
     : moment (NULL),
       timers (NULL),
       page_pool (NULL),
-
-      send_metadata (true),
-      enable_prechunking (true),
-      keep_video_stream (false),
-      continuous_playback (true),
-
-      default_width (0),
-      default_height (0),
-      default_bitrate (0),
-
-      no_video_timeout (0),
-
-      is_chain (false),
 
       stream_ticket (NULL),
 

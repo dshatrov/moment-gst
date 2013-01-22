@@ -20,6 +20,7 @@ moment_gst_private_headers =
 moment_gst_target_headers =	\
 	moment_gst_module.h	\
 	channel.h		\
+        channel_options.h       \
 	channel_set.h		\
 	recorder.h		\
 	gst_stream.h		\

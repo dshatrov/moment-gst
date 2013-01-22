@@ -1,5 +1,5 @@
 /*  Moment-Gst - GStreamer support module for Moment Video Server
-    Copyright (C) 2011 Dmitry Shatrov
+    Copyright (C) 2011-2013 Dmitry Shatrov
 
     This program is free software; you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -17,12 +17,13 @@
 */
 
 
-#ifndef __MOMENT_GST__CHANNEL__H__
-#define __MOMENT_GST__CHANNEL__H__
+#ifndef MOMENT_GST__CHANNEL__H__
+#define MOMENT_GST__CHANNEL__H__
 
 
 #include <moment/libmoment.h>
 
+#include <moment-gst/channel_options.h>
 #include <moment-gst/gst_stream_ctl.h>
 #include <moment-gst/playback.h>
 
@@ -129,9 +130,10 @@ public:
     }
 
     void setSingleItem (ConstMemory const stream_spec,
-			bool        const is_chain)
+			bool        const is_chain,
+                        bool        const force_transcode)
     {
-	playback.setSingleItem (stream_spec, is_chain);
+	playback.setSingleItem (stream_spec, is_chain, force_transcode);
     }
 
     Result loadPlaylistFile (ConstMemory   const filename,
@@ -163,21 +165,8 @@ public:
 	return &event_informer;
     }
 
-    mt_const void init (MomentServer *moment,
-			ConstMemory   channel_name,
-                        bool          no_audio,
-                        bool          no_video,
-			bool          send_metadata,
-                        bool          enable_prechunking,
-			bool          keep_video_stream,
-                        bool          continuous_playback,
-                        bool          connect_on_demand,
-                        Time          connect_on_demand_timeout,
-			Size          default_width,
-			Size          default_height,
-			Size          default_bitrate,
-			Time          no_video_timeout,
-                        Uint64        min_playlist_duration_sec);
+    mt_const void init (MomentServer   *moment,
+                        ChannelOptions *opts);
 
     Channel ();
 };
@@ -185,5 +174,5 @@ public:
 }
 
 
-#endif /* __MOMENT_GST__CHANNEL__H__ */
+#endif /* MOMENT_GST__CHANNEL__H__ */
 

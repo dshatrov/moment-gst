@@ -1,5 +1,5 @@
 /*  Moment-Gst - GStreamer support module for Moment Video Server
-    Copyright (C) 2011 Dmitry Shatrov
+    Copyright (C) 2011-2013 Dmitry Shatrov
 
     This program is free software; you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -310,13 +310,14 @@ Playback::setPosition_Index (Count const idx,
 
 void
 Playback::setSingleItem (ConstMemory const stream_spec,
-			 bool        const is_chain)
+			 bool        const is_chain,
+                         bool        const force_transcode)
 {
     logD (playback, _func_);
 
     mutex.lock ();
     playlist.clear ();
-    playlist.setSingleItem (stream_spec, is_chain);
+    playlist.setSingleItem (stream_spec, is_chain, force_transcode);
 
     next_item = playlist.getNextItem (NULL /* prv_item */,
 				      getUnixtime(),

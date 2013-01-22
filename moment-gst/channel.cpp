@@ -92,6 +92,7 @@ Channel::startPlaybackItem (Playlist::Item          * const item,
     if (got_chain_spec) {
 	self->stream_ctl->beginVideoStream (item->chain_spec->mem(),
 					    true /* is_chain */,
+                                            item->force_transcode,
 					    advance_ticket /* stream_ticket */,
 					    advance_ticket /* stream_ticket_ref */,
 					    seek);
@@ -99,6 +100,7 @@ Channel::startPlaybackItem (Playlist::Item          * const item,
     if (got_uri) {
 	self->stream_ctl->beginVideoStream (item->uri->mem(),
 					    false /* is_chain */,
+                                            item->force_transcode,
 					    advance_ticket /* stream_ticket */,
 					    advance_ticket /* stream_ticket_ref */,
 					    seek);
@@ -171,43 +173,18 @@ Channel::fireNewVideoStream ()
 }
 
 mt_const void
-Channel::init (MomentServer * const moment,
-	       ConstMemory    const channel_name,
-               bool           const no_audio,
-               bool           const no_video,
-	       bool           const send_metadata,
-               bool           const enable_prechunking,
-	       bool           const keep_video_stream,
-               bool           const continuous_playback,
-               bool           const connect_on_demand,
-               Time           const connect_on_demand_timeout,
-	       Size           const default_width,
-	       Size           const default_height,
-	       Size           const default_bitrate,
-	       Time           const no_video_timeout,
-               Uint64         const min_playlist_duration_sec)
+Channel::init (MomentServer   * const moment,
+               ChannelOptions * const opts)
 {
-    playback.init (moment->getServerApp()->getServerContext()->getTimers(),
-                   min_playlist_duration_sec);
+    playback.init (moment->getServerApp()->getServerContext()->getMainThreadContext()->getTimers(),
+                   opts->min_playlist_duration_sec);
     playback.setFrontend (CbDesc<Playback::Frontend> (
 	    &playback_frontend, this /* cb_data */, this /* coderef_container */));
 
     stream_ctl = grab (new GstStreamCtl);
     stream_ctl->init (moment,
-		      moment->getServerApp()->getMainThreadContext()->getDeferredProcessor(),
-		      channel_name,
-                      no_audio,
-                      no_video,
-		      send_metadata,
-                      enable_prechunking,
-		      keep_video_stream,
-                      continuous_playback,
-                      connect_on_demand,
-                      connect_on_demand_timeout,
-		      default_width,
-		      default_height,
-		      default_bitrate,
-		      no_video_timeout);
+		      moment->getServerApp()->getServerContext()->getMainThreadContext()->getDeferredProcessor(),
+                      opts);
 
     stream_ctl->setFrontend (CbDesc<GstStreamCtl::Frontend> (
 	    &gst_stream_ctl_frontend, this /* cb_data */, this /* coderef_container */));

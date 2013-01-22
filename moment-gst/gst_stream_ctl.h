@@ -1,5 +1,5 @@
 /*  Moment-Gst - GStreamer support module for Moment Video Server
-    Copyright (C) 2011 Dmitry Shatrov
+    Copyright (C) 2011-2013 Dmitry Shatrov
 
     This program is free software; you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -17,8 +17,8 @@
 */
 
 
-#ifndef __MOMENT_GST__GST_STREAM_CTL__H__
-#define __MOMENT_GST__GST_STREAM_CTL__H__
+#ifndef MOMENT_GST__GST_STREAM_CTL__H__
+#define MOMENT_GST__GST_STREAM_CTL__H__
 
 
 #include <libmary/types.h>
@@ -71,33 +71,18 @@ private:
     mt_const Timers *timers;
     mt_const PagePool *page_pool;
 
-    mt_const Ref<String> stream_name;
-
-    DeferredProcessor::Registration deferred_reg;
     DeferredProcessor::Task deferred_task;
+    DeferredProcessor::Registration deferred_reg;
 
   // Defaults
 
-    mt_const bool no_audio;
-    mt_const bool no_video;
-    mt_const bool send_metadata;
-    mt_const bool enable_prechunking;
-    mt_const bool keep_video_stream;
-    mt_const bool continuous_playback;
-
-    mt_const bool connect_on_demand;
-    mt_const Time connect_on_demand_timeout;
-
-    mt_const Uint64 default_width;
-    mt_const Uint64 default_height;
-    mt_const Uint64 default_bitrate;
-
-    mt_const Time no_video_timeout;
+    Ref<ChannelOptions> channel_opts;
 
   // Stream source description
 
     mt_mutex (mutex) Ref<String> stream_spec;
     mt_mutex (mutex) bool is_chain;
+    mt_mutex (mutex) bool force_transcode;
 
   // Video stream state
 
@@ -151,12 +136,10 @@ private:
     void setStreamParameters (VideoStream * mt_nonnull video_stream);
 
     mt_iface (VideoStream::EventHandler)
-
         static VideoStream::EventHandler const stream_event_handler;
 
         static void numWatchersChanged (Count  num_watchers,
                                         void  *_data);
-
     mt_iface_end
 
     static void connectOnDemandTimerTick (void *_stream_data);
@@ -175,7 +158,6 @@ private:
 
     mt_iface (GstStream::Frontend)
     mt_begin
-
       static GstStream::Frontend gst_stream_frontend;
 
       static void streamError (void *_stream_data);
@@ -187,12 +169,12 @@ private:
       static void gotVideo (void *_stream_data);
 
       static void streamStatusEvent (void *_stream_data);
-
     mt_end
 
 public:
     void beginVideoStream (ConstMemory     stream_spec,
 			   bool            is_chain,
+                           bool            force_transcode,
 			   void           *stream_ticket,
 			   VirtReferenced *stream_ticket_ref,
 			   Time            seek = 0);
@@ -216,21 +198,9 @@ public:
 
     void resetTrafficStats ();
 
-    mt_const void init (MomentServer      *moment,
-			DeferredProcessor *deferred_processor,
-			ConstMemory        stream_name,
-                        bool               no_audio,
-                        bool               no_video,
-			bool               send_metadata,
-                        bool               enable_prechunking,
-			bool               keep_video_stream,
-                        bool               continuous_playback,
-                        bool               connect_on_demand,
-                        Time               connect_on_demand_timeout,
-			Uint64             default_width,
-			Uint64             default_height,
-			Uint64             default_bitrate,
-			Time               no_video_timeout);
+    mt_const void init (MomentServer      * mt_nonnull moment,
+			DeferredProcessor * mt_nonnull deferred_processor,
+                        ChannelOptions    * mt_nonnull channel_opts);
 
 // TODO Unused?
 #if 0
@@ -250,5 +220,5 @@ public:
 }
 
 
-#endif /* __MOMENT_GST__GST_STREAM_CTL__H__ */
+#endif /* MOMENT_GST__GST_STREAM_CTL__H__ */
 

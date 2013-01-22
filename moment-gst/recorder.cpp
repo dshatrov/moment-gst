@@ -263,7 +263,7 @@ Recorder::init (MomentServer * const moment,
     this->channel_set = channel_set;
     this->filename_prefix = grab (new String (filename_prefix));
 
-    playback.init (moment->getServerApp()->getServerContext()->getTimers(),
+    playback.init (moment->getServerApp()->getServerContext()->getMainThreadContext()->getTimers(),
                    min_playlist_duration_sec);
     playback.setFrontend (CbDesc<Playback::Frontend> (
 	    &playback_frontend,
@@ -277,7 +277,7 @@ Recorder::init (MomentServer * const moment,
 	    recorder_thread_ctx = thread_ctx;
 	} else {
 	    logE_ (_func, "Couldn't get recorder thread context: ", exc->toString());
-	    thread_ctx = moment->getServerApp()->getMainThreadContext();
+	    thread_ctx = moment->getServerApp()->getServerContext()->getMainThreadContext();
 	}
 
 	recorder.init (thread_ctx, moment->getStorage());

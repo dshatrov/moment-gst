@@ -1,5 +1,5 @@
 /*  Moment-Gst - GStreamer support module for Moment Video Server
-    Copyright (C) 2011 Dmitry Shatrov
+    Copyright (C) 2011-2013 Dmitry Shatrov
 
     This program is free software; you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -17,8 +17,8 @@
 */
 
 
-#ifndef __MOMENT_GST__PLAYBACK__H__
-#define __MOMENT_GST__PLAYBACK__H__
+#ifndef MOMENT_GST__PLAYBACK__H__
+#define MOMENT_GST__PLAYBACK__H__
 
 
 #include <libmary/libmary.h>
@@ -109,7 +109,8 @@ public:
 			      Time  seek);
 
     void setSingleItem (ConstMemory stream_spec,
-			bool        is_chain);
+			bool        is_chain,
+                        bool        force_transcode);
 
     void setSingleChannelRecorder (ConstMemory channel_name);
 
@@ -137,5 +138,5 @@ public:
 }
 
 
-#endif /* __MOMENT_GST__PLAYBACK__H__ */
+#endif /* MOMENT_GST__PLAYBACK__H__ */
 

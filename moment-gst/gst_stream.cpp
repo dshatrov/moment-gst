@@ -1,5 +1,5 @@
 /*  Moment-Gst - GStreamer support module for Moment Video Server
-    Copyright (C) 2011 Dmitry Shatrov
+    Copyright (C) 2011-2013 Dmitry Shatrov
 
     This program is free software; you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -26,9 +26,9 @@ using namespace Moment;
 namespace MomentGst {
 
 static LogGroup libMary_logGroup_chains   ("moment-gst_chains",   LogLevel::I);
-static LogGroup libMary_logGroup_pipeline ("moment-gst_pipeline", LogLevel::I);
-static LogGroup libMary_logGroup_stream   ("moment-gst_stream",   LogLevel::I);
-static LogGroup libMary_logGroup_bus      ("moment-gst_bus",      LogLevel::I);
+static LogGroup libMary_logGroup_pipeline ("moment-gst_pipeline", LogLevel::D);
+static LogGroup libMary_logGroup_stream   ("moment-gst_stream",   LogLevel::D);
+static LogGroup libMary_logGroup_bus      ("moment-gst_bus",      LogLevel::D);
 static LogGroup libMary_logGroup_frames   ("moment-gst_frames",   LogLevel::E); // E is the default
 static LogGroup libMary_logGroup_novideo  ("moment-gst_novideo",  LogLevel::I);
 
@@ -84,11 +84,11 @@ GstStream::workqueueThreadFunc (void * const _self)
 void
 GstStream::createPipelineForChainSpec ()
 {
-    logD (chains, _func, stream_spec);
+    logD (chains, _func, channel_opts->stream_spec);
 
-    assert (is_chain);
+    assert (channel_opts->is_chain);
 
-    if (!stream_spec->mem().len())
+    if (!channel_opts->stream_spec->mem().len())
 	return;
 
     GstElement *chain_el = NULL;
@@ -100,7 +100,7 @@ GstStream::createPipelineForChainSpec ()
 
   {
     GError *error = NULL;
-    chain_el = gst_parse_launch (stream_spec->cstr(), &error);
+    chain_el = gst_parse_launch (channel_opts->stream_spec->cstr(), &error);
     if (!chain_el) {
 	if (error) {
 	    logE_ (_func, "gst_parse_launch() failed: ", error->code,
@@ -126,7 +126,7 @@ GstStream::createPipelineForChainSpec ()
 	    GstPad * const pad = gst_element_get_static_pad (in_stats_el, "sink");
 	    if (!pad) {
 		logE_ (_func, "element called \"in_stats\" doesn't have a \"sink\" "
-		       "pad. Chain spec: ", stream_spec);
+		       "pad. Chain spec: ", channel_opts->stream_spec);
 		goto _failure;
 	    }
 
@@ -147,7 +147,7 @@ GstStream::createPipelineForChainSpec ()
 	    GstPad * const pad = gst_element_get_static_pad (audio_el, "sink");
 	    if (!pad) {
 		logE_ (_func, "element called \"audio\" doesn't have a \"sink\" "
-		       "pad. Chain spec: ", stream_spec);
+		       "pad. Chain spec: ", channel_opts->stream_spec);
 		goto _failure;
 	    }
 
@@ -176,9 +176,9 @@ GstStream::createPipelineForChainSpec ()
 	    gst_object_unref (audio_el);
 	    audio_el = NULL;
 	} else {
-	    logW_ (_func, "chain \"", stream_name, "\" does not contain "
+	    logW_ (_func, "chain \"", channel_opts->channel_name, "\" does not contain "
 		   "an element named \"audio\". There'll be no audio "
-		   "for the stream. Chain spec: ", stream_spec);
+		   "for the stream. Chain spec: ", channel_opts->stream_spec);
 	}
     }
 
@@ -188,7 +188,7 @@ GstStream::createPipelineForChainSpec ()
 	    GstPad * const pad = gst_element_get_static_pad (video_el, "sink");
 	    if (!pad) {
 		logE_ (_func, "element called \"video\" doesn't have a \"sink\" "
-		       "pad. Chain spec: ", stream_spec);
+		       "pad. Chain spec: ", channel_opts->stream_spec);
 		goto _failure;
 	    }
 
@@ -203,9 +203,9 @@ GstStream::createPipelineForChainSpec ()
 	    gst_object_unref (video_el);
 	    video_el = NULL;
 	} else {
-	    logW_ (_func, "chain \"", stream_name, "\" does not contain "
+	    logW_ (_func, "chain \"", channel_opts->channel_name, "\" does not contain "
 		   "an element named \"video\". There'll be no video "
-		   "for the stream. Chain spec: ", stream_spec);
+		   "for the stream. Chain spec: ", channel_opts->stream_spec);
 	}
     }
 
@@ -221,15 +221,15 @@ GstStream::createPipelineForChainSpec ()
 	g_object_ref (mix_video_src);
     }
 
-    logD (chains, _func, "chain \"", stream_name, "\" created");
+    logD (chains, _func, "chain \"", channel_opts->channel_name, "\" created");
 
     if (!mt_unlocks (mutex) setPipelinePlaying ()) {
 	mutex.lock ();
 	goto _failure;
     }
+  }
 
     goto _return;
-  }
 
 mt_mutex (mutex) _failure:
     mt_unlocks (mutex) pipelineCreationFailed ();
@@ -254,9 +254,9 @@ GstStream::createPipelineForUri ()
 {
     logD (pipeline, _this_func_);
 
-    assert (!is_chain);
+    assert (!channel_opts->is_chain);
 
-    if (!stream_spec->mem().len())
+    if (!channel_opts->stream_spec->mem().len())
 	return;
 
     GstElement *playbin           = NULL,
@@ -396,25 +396,25 @@ GstStream::createPipelineForUri ()
 	    goto _failure;
 	}
 
-	if (default_width && default_height) {
+	if (channel_opts->default_width && channel_opts->default_height) {
 	    g_object_set (G_OBJECT (video_capsfilter), "caps",
 			  gst_caps_new_simple ("video/x-raw-yuv",
-					       "width",  G_TYPE_INT, (int) default_width,
-					       "height", G_TYPE_INT, (int) default_height,
+					       "width",  G_TYPE_INT, (int) channel_opts->default_width,
+					       "height", G_TYPE_INT, (int) channel_opts->default_height,
 					       "pixel-aspect-ratio", GST_TYPE_FRACTION, 1, 1,
 					       NULL), NULL);
 	} else
-	if (default_width) {
+	if (channel_opts->default_width) {
 	    g_object_set (G_OBJECT (video_capsfilter), "caps",
 			  gst_caps_new_simple ("video/x-raw-yuv",
-					       "width",  G_TYPE_INT, (int) default_width,
+					       "width",  G_TYPE_INT, (int) channel_opts->default_width,
 					       "pixel-aspect-ratio", GST_TYPE_FRACTION, 1, 1,
 					       NULL), NULL);
 	} else
-	if (default_height) {
+	if (channel_opts->default_height) {
 	    g_object_set (G_OBJECT (video_capsfilter), "caps",
 			  gst_caps_new_simple ("video/x-raw-yuv",
-					       "height", G_TYPE_INT, (int) default_height,
+					       "height", G_TYPE_INT, (int) channel_opts->default_height,
 					       "pixel-aspect-ratio", GST_TYPE_FRACTION, 1, 1,
 					       NULL), NULL);
 	}
@@ -426,7 +426,7 @@ GstStream::createPipelineForUri ()
 	}
 	// TODO Config parameter for bitrate.
 //	g_object_set (G_OBJECT (video_encoder), "bitrate", 100000, NULL);
-	g_object_set (G_OBJECT (video_encoder), "bitrate", (gulong) default_bitrate, NULL);
+	g_object_set (G_OBJECT (video_encoder), "bitrate", (gulong) channel_opts->default_bitrate, NULL);
 
 #if 0
 	{
@@ -473,7 +473,7 @@ GstStream::createPipelineForUri ()
     g_object_set (G_OBJECT (playbin), "video-sink", video_encoder_bin, NULL);
     video_encoder_bin = NULL;
 
-    g_object_set (G_OBJECT (playbin), "uri", stream_spec->cstr(), NULL);
+    g_object_set (G_OBJECT (playbin), "uri", channel_opts->stream_spec->cstr(), NULL);
 
     // TODO got_video, got_auido -?
 
@@ -511,6 +511,480 @@ _return:
 	gst_object_unref (GST_OBJECT (video_capsfilter));
 }
 
+void
+GstStream::createSmartPipelineForUri ()
+{
+    logD_ (_this_func_);
+
+    assert (!channel_opts->is_chain);
+
+    if (channel_opts->stream_spec->mem().len() == 0)
+        return;
+
+    GstElement *pipeline  = NULL,
+               *decodebin = NULL;
+
+    mutex.lock ();
+
+    got_audio_pad = false;
+    got_video_pad = false;
+
+    if (stream_closed)
+        goto _failure;
+
+  {
+    pipeline = gst_pipeline_new ("pipeline");
+    // TODO add bus watch
+
+    decodebin = gst_element_factory_make ("uridecodebin", NULL);
+    if (!decodebin) {
+        logE_ (_func, "gst_element_factory_make() failed (decodebin2)");
+        goto _failure;
+    }
+
+    g_signal_connect (decodebin, "autoplug-continue", G_CALLBACK (decodebinAutoplugContinue), this);
+    g_signal_connect (decodebin, "pad-added", G_CALLBACK (decodebinPadAdded), this);
+
+    this->playbin = pipeline;
+    logD_ (_this_func, "this->playbin: 0x", fmt_hex, (UintPtr) this->playbin);
+    gst_object_ref (this->playbin);
+
+    gst_bin_add_many (GST_BIN (pipeline), decodebin, NULL);
+    g_object_set (G_OBJECT (decodebin), "uri", channel_opts->stream_spec->cstr(), NULL);
+    decodebin = NULL;
+
+    if (!mt_unlocks (mutex) setPipelinePlaying ()) {
+        mutex.lock ();
+	goto _failure;
+    }
+  }
+
+    goto _return;
+
+mt_mutex (mutex) _failure:
+    mt_unlocks (mutex) pipelineCreationFailed ();
+
+_return:
+    if (pipeline)
+        gst_object_unref (GST_OBJECT (pipeline));
+    if (decodebin)
+        gst_object_unref (GST_OBJECT (decodebin));
+}
+
+static bool areCapsCompatible (GstCaps * const caps,
+                               GstCaps * const ref_caps)
+{
+    bool result = false;
+
+    {
+        gchar * const str = gst_caps_to_string (caps);
+        logD_ (_func, "caps: ", str);
+        g_free (str);
+    }
+
+    GstCaps * const common_caps = gst_caps_intersect (caps, ref_caps);
+
+    if (common_caps && !gst_caps_is_empty (common_caps)) {
+        gchar * const common_str = gst_caps_to_string (common_caps);
+        logD_ (_func, "common_caps: ", common_str);
+        g_free (common_str);
+
+        result = true;
+    } else {
+        logD_ (_func, "No caps match");
+    }
+
+    if (common_caps)
+        gst_caps_unref (common_caps);
+
+    return result;
+}
+
+static bool isAnyCaps (GstCaps     * const caps,
+                       ConstMemory   const ref_mem)
+{
+    GstStructure * const st = gst_caps_get_structure (caps, 0);
+    gchar const * st_name = gst_structure_get_name (st);
+
+    ConstMemory const st_name_mem (st_name, strlen (st_name));
+
+    if (st_name_mem.len() >= ref_mem.len()
+        && equal (ref_mem, ConstMemory (st_name_mem.mem(), ref_mem.len())))
+    {
+        return true;
+    }
+
+    return false;
+}
+
+static bool isAnyAudioCaps (GstCaps * const caps)
+{
+    return isAnyCaps (caps, "audio");
+}
+
+static bool isAnyVideoCaps (GstCaps * const caps)
+{
+    return isAnyCaps (caps, "video");
+}
+
+static bool isRawAudioCaps (GstCaps * const caps)
+{
+    GstCaps * const raw_caps =
+            gst_caps_new_full (
+                    gst_structure_new ("audio/x-raw-int", NULL),
+                    gst_structure_new ("audio/x-raw-float", NULL),
+                    NULL);
+    bool const res = areCapsCompatible (caps, raw_caps);
+    gst_caps_unref (raw_caps);
+    return res;
+}
+
+static bool isRawVideoCaps (GstCaps * const caps)
+{
+    GstCaps * const raw_caps =
+            gst_caps_new_full (
+                    gst_structure_new ("video/x-raw-yuv", NULL),
+                    gst_structure_new ("video/x-raw-rgb", NULL),
+                    NULL);
+    bool const res = areCapsCompatible (caps, raw_caps);
+    gst_caps_unref (raw_caps);
+    return res;
+}
+
+static bool isMpegAudioCaps (GstCaps * const caps)
+{
+    GstCaps * const raw_caps =
+            gst_caps_new_full (
+                    gst_structure_new ("audio/mpeg", NULL),
+                    NULL);
+    bool const res = areCapsCompatible (caps, raw_caps);
+    gst_caps_unref (raw_caps);
+    return res;
+}
+
+static bool isH264VideoCaps (GstCaps * const caps)
+{
+    GstCaps * const raw_caps =
+            gst_caps_new_full (
+                    gst_structure_new ("video/x-h264", NULL),
+                    NULL);
+    bool const res = areCapsCompatible (caps, raw_caps);
+    gst_caps_unref (raw_caps);
+    return res;
+}
+
+gboolean
+GstStream::decodebinAutoplugContinue (GstElement * const /* bin */,
+                                      GstPad     * const /* pad */,
+                                      GstCaps    * const caps,
+                                      gpointer     const _self)
+{
+    GstStream * const self = static_cast <GstStream*> (_self);
+
+    logD_ (_func_);
+
+    {
+        gchar * const str = gst_caps_to_string (caps);
+        logD_ (_func, "caps: ", str);
+        g_free (str);
+    }
+
+    if (!self->channel_opts->force_transcode && !self->channel_opts->force_transcode_audio) {
+        if (isMpegAudioCaps (caps)) {
+            logD_ (_func, "autoplugged mpeg audio");
+            return FALSE;
+        }
+    }
+
+    if (!self->channel_opts->force_transcode && !self->channel_opts->force_transcode_video) {
+        if (isH264VideoCaps (caps)) {
+            logD_ (_func, "autoplugged h.264 video");
+            return FALSE;
+        }
+    }
+
+    return TRUE;
+}
+
+void
+GstStream::decodebinPadAdded (GstElement * const /* element */,
+                              GstPad     * const new_pad,
+                              gpointer     const _self)
+{
+    GstStream * const self = static_cast <GstStream*> (_self);
+
+    logD_ (_func_);
+
+    GstCaps * const caps = gst_pad_get_caps (new_pad);
+    if (!caps) {
+        logD_ (_func, "NULL caps");
+        return;
+    }
+
+    if (self->channel_opts->no_audio
+        && isAnyAudioCaps (caps))
+    {
+        self->setAudioPad (new_pad);
+        gst_caps_unref (caps);
+        return;
+    }
+
+    if (self->channel_opts->no_video
+        && isAnyVideoCaps (caps))
+    {
+        self->setVideoPad (new_pad);
+        gst_caps_unref (caps);
+        return;
+    }
+
+    if (isRawAudioCaps (caps)) {
+        self->setRawAudioPad (new_pad);
+        gst_caps_unref (caps);
+        return;
+    }
+
+    if (isRawVideoCaps (caps)) {
+        self->setRawVideoPad (new_pad);
+        gst_caps_unref (caps);
+        return;
+    }
+
+    if (isMpegAudioCaps (caps)) {
+        // TODO Process AAC and MP3
+        self->setAudioPad (new_pad);
+        gst_caps_unref (caps);
+        return;
+    }
+
+    if (isH264VideoCaps (caps)) {
+        self->setVideoPad (new_pad);
+        gst_caps_unref (caps);
+        return;
+    }
+
+    logW_ (_func, "Unknown stream data format");
+    gst_caps_unref (caps);
+}
+
+mt_unlocks (mutex) void
+GstStream::doSetPad (GstPad            * const pad,
+                     ConstMemory         const sink_el_name,
+                     MediaDataCallback   const media_data_cb,
+                     ConstMemory         const chain)
+{
+    assert (playbin);
+
+    GstElement *encoder_bin = NULL;
+
+    {
+        GError *err = NULL;
+        // TODO 'sync=true' should be optional (sometimes undesirable)
+        // TODO configurable encoder
+        String const chain_str (chain);
+        logD_ (_func, "calling gst_parse_bin_from_description()");
+        encoder_bin = gst_parse_bin_from_description (chain_str.cstr(),
+                                                      TRUE /* ghost_unlinked_pads */,
+                                                      &err);
+        logD_ (_func, "gst_parse_bin_from_description() returned");
+        if (!encoder_bin) {
+            logE_ (_func, "gst_parse_bin_from_description() failed: ", err->message);
+            goto _failure;
+        }
+
+        if (err)
+            logE_ (_func, "gst_parse_bin_from_description() recoverable error: ", err->message);
+    }
+
+    if (media_data_cb) {
+        String const sink_el_name_str (sink_el_name);
+        GstElement * const sink_el = gst_bin_get_by_name (GST_BIN (encoder_bin), sink_el_name_str.cstr());
+        if (!sink_el) {
+            logE_ (_func, "no \"", sink_el_name, "\" element in the encoding bin");
+            goto _failure;
+        }
+
+        GstPad * const sink_pad = gst_element_get_static_pad (sink_el, "sink");
+        if (!sink_pad) {
+            logE_ (_func, "element called \"", sink_el_name, "\" doesn't have a \"sink\" pad");
+            gst_object_unref (sink_el);
+            goto _failure;
+        }
+
+        // TODO Use "handoff" signal
+        gst_pad_add_buffer_probe (sink_pad, G_CALLBACK (media_data_cb), this);
+
+        gst_object_unref (sink_pad);
+        gst_object_unref (sink_el);
+    }
+
+    {
+        GstPad * const sink_pad = gst_element_get_static_pad (encoder_bin, "sink");
+        if (!sink_pad) {
+            logE_ (_func, "encoder_bin doesn't have a \"sink\" pad");
+            goto _failure;
+        }
+
+        GstElement * const tmp_playbin = this->playbin;
+        gst_object_ref (tmp_playbin);
+        // TODO unref
+
+        mutex.unlock ();
+
+        gst_bin_add (GST_BIN (tmp_playbin), encoder_bin);
+
+#if 0
+        logD_ (_func, "setting state to PLAYING, locked: ", GST_OBJECT_FLAG_IS_SET (encoder_bin, GST_ELEMENT_LOCKED_STATE));
+        if (gst_element_set_state (encoder_bin, GST_STATE_PLAYING) == GST_STATE_CHANGE_FAILURE) {
+            logE_ (_func, "gst_element_set_state() failed (PLAYING)");
+            encoder_bin = NULL;
+            goto _failure_unlocked;
+        }
+#endif
+
+//        encoder_bin = NULL;
+
+        if (gst_pad_link (pad, sink_pad) != GST_PAD_LINK_OK) {
+            logE_ (_func, "gst_pad_link() failed");
+            gst_object_unref (sink_pad);
+            goto _failure_unlocked;
+        }
+        gst_object_unref (sink_pad);
+
+        logD_ (_func, "setting state to PLAYING, locked: ", GST_OBJECT_FLAG_IS_SET (encoder_bin, GST_ELEMENT_LOCKED_STATE));
+        {
+            GstStateChangeReturn res = gst_element_set_state (encoder_bin, GST_STATE_PLAYING);
+            switch (res) {
+                case GST_STATE_CHANGE_FAILURE:
+                    logD_ (_func, "GST_STATE_CHANGE_FAILURE");
+                    break;
+                case GST_STATE_CHANGE_SUCCESS:
+                    logD_ (_func, "GST_STATE_CHANGE_SUCCESS");
+                    break;
+                case GST_STATE_CHANGE_ASYNC:
+                    logD_ (_func, "GST_STATE_CHANGE_ASYNC");
+                    break;
+                case GST_STATE_CHANGE_NO_PREROLL:
+                    logD_ (_func, "GST_STATE_CHANGE_NO_PREROLL");
+                    break;
+                default:
+                    logD_ (_func, "Unknown GstStateChangeReturn");
+            }
+            if (res == GST_STATE_CHANGE_FAILURE) {
+                logE_ (_func, "gst_element_set_state() failed (PLAYING)");
+                encoder_bin = NULL;
+                goto _failure_unlocked;
+            }
+        }
+
+#if 0
+        logD_ (_func, "setting state to PLAYING #2, locked: ", GST_OBJECT_FLAG_IS_SET (playbin, GST_ELEMENT_LOCKED_STATE));
+        if (gst_element_set_state (playbin, GST_STATE_PLAYING) == GST_STATE_CHANGE_FAILURE) {
+            logE_ (_func, "gst_element_set_state() failed (PLAYING)");
+            encoder_bin = NULL;
+            goto _failure_unlocked;
+        }
+#endif
+    }
+
+    goto _failure_unlocked;
+
+_failure:
+    mutex.unlock ();
+
+_failure_unlocked:
+    ;
+//    if (encoder_bin)
+//        gst_object_unref (encoder_bin);
+}
+
+void
+GstStream::doSetAudioPad (GstPad      * const pad,
+                          ConstMemory   const chain)
+{
+    logD_ (_this_func, chain);
+
+    mutex.lock ();
+    if (got_audio_pad) {
+        mutex.unlock ();
+
+	GstCaps * const caps = gst_pad_get_caps (pad);
+        gchar * const str = gst_caps_to_string (caps);
+        logD_ (_this_func, "ignoring extra audio pad, caps: ", str);
+        g_free (str);
+        gst_caps_unref (caps);
+
+        return;
+    }
+    got_audio_pad = true;
+
+    got_audio = true;
+
+    mt_unlocks (mutex) doSetPad (pad,
+                                 "audio",
+                                 channel_opts->no_audio ? NULL : GstStream::audioDataCb,
+                                 chain);
+}
+
+void
+GstStream::doSetVideoPad (GstPad      * const pad,
+                          ConstMemory   const chain)
+{
+    logD_ (_this_func, chain);
+
+    mutex.lock ();
+    if (got_video_pad) {
+        mutex.unlock ();
+
+	GstCaps * const caps = gst_pad_get_caps (pad);
+        gchar * const str = gst_caps_to_string (caps);
+        logD_ (_this_func, "ignoring extra video pad, caps: ", str);
+        g_free (str);
+        gst_caps_unref (caps);
+
+        return;
+    }
+    got_video_pad = true;
+
+    got_video = true;
+
+    mt_unlocks (mutex) doSetPad (pad,
+                                 "video",
+                                 channel_opts->no_video ? NULL : GstStream::videoDataCb,
+                                 chain);
+}
+
+void
+GstStream::setRawAudioPad (GstPad * const pad)
+{
+    doSetAudioPad (pad,
+                   "audioconvert ! audioresample ! "
+                   "audio/x-raw-int,rate=16000,channels=1 ! "
+                   "speexenc ! fakesink name=audio sync=true");
+}
+
+void
+GstStream::setRawVideoPad (GstPad * const pad)
+{
+    doSetVideoPad (pad,
+                   "ffmpegcolorspace ! "
+                   "x264enc bitrate=500 speed-preset=veryfast profile=baseline key-int-max=30 threads=1 sliced-threads=true ! "
+                   "fakesink name=video sync=true");
+}
+
+void
+GstStream::setAudioPad (GstPad * const pad)
+{
+    doSetAudioPad (pad,
+                   "fakesink name=audio sync=true");
+}
+
+void
+GstStream::setVideoPad (GstPad * const pad)
+{
+    doSetVideoPad (pad,
+                   "fakesink name=video sync=true");
+}
+
 mt_unlocks (mutex) Result
 GstStream::setPipelinePlaying ()
 {
@@ -520,11 +994,11 @@ GstStream::setPipelinePlaying ()
     assert (chain_el);
     gst_object_ref (chain_el);
 
-    if (no_video_timeout > 0) {
+    if (channel_opts->no_video_timeout > 0) {
 	no_video_timer = timers->addTimer (CbDesc<Timers::TimerCallback> (noVideoTimerTick,
                                                                           this /* cb_data */,
                                                                           this /* coderef_container */),
-					   no_video_timeout /* TODO config param for the timeout */,
+					   channel_opts->no_video_timeout,
 					   true  /* periodical */,
                                            false /* auto_delete */);
     }
@@ -681,7 +1155,7 @@ GstStream::reportMetaData ()
     }
     metadata_reported = true;
 
-    if (!send_metadata)
+    if (!channel_opts->send_metadata)
 	return;
 
     VideoStream::VideoMessage msg;
@@ -980,7 +1454,7 @@ GstStream::doAudioData (GstBuffer * const buffer)
     if (first_audio_frame) {
 	first_audio_frame = false;
 
-	if (send_metadata) {
+	if (channel_opts->send_metadata) {
 	    if (!got_video || !first_video_frame) {
 	      // There's no video or we've got the first video frame already.
 		reportMetaData ();
@@ -1046,7 +1520,7 @@ GstStream::doAudioData (GstBuffer * const buffer)
 
             PagePool::PageListHead page_list;
 
-            if (enable_prechunking) {
+            if (channel_opts->enable_prechunking) {
                 Size msg_audio_hdr_len = 1;
                 if (codec_data_type == VideoStream::AudioFrameType::AacSequenceHeader)
                     msg_audio_hdr_len = 2;
@@ -1069,7 +1543,7 @@ GstStream::doAudioData (GstBuffer * const buffer)
 
 	    VideoStream::AudioMessage msg;
 	    msg.timestamp_nanosec = cd_timestamp_nanosec;
-	    msg.prechunk_size = (enable_prechunking ? RtmpConnection::PrechunkSize : 0);
+	    msg.prechunk_size = (channel_opts->enable_prechunking ? RtmpConnection::PrechunkSize : 0);
 	    msg.frame_type = codec_data_type;
 	    msg.codec_id = tmp_audio_codec_id;
             msg.rate = tmp_audio_rate;
@@ -1098,7 +1572,7 @@ GstStream::doAudioData (GstBuffer * const buffer)
 
     PagePool::PageListHead page_list;
 
-    if (enable_prechunking) {
+    if (channel_opts->enable_prechunking) {
         Size gen_audio_hdr_len = 1;
         if (tmp_audio_codec_id == VideoStream::AudioCodecId::AAC)
             gen_audio_hdr_len = 2;
@@ -1120,7 +1594,7 @@ GstStream::doAudioData (GstBuffer * const buffer)
 
     VideoStream::AudioMessage msg;
     msg.timestamp_nanosec = timestamp_nanosec;
-    msg.prechunk_size = (enable_prechunking ? RtmpConnection::PrechunkSize : 0);
+    msg.prechunk_size = (channel_opts->enable_prechunking ? RtmpConnection::PrechunkSize : 0);
     msg.frame_type = VideoStream::AudioFrameType::RawData;
     msg.codec_id = tmp_audio_codec_id;
 
@@ -1266,7 +1740,9 @@ GstStream::doVideoData (GstBuffer * const buffer)
 	   video_codec_id = VideoStream::VideoCodecId::ScreenVideo;
 	}
 
-	if (send_metadata) {
+        gst_caps_unref (caps);
+
+	if (channel_opts->send_metadata) {
 	    if (!got_audio || !first_audio_frame) {
 	      // There's no video or we've got the first video frame already.
 		reportMetaData ();
@@ -1335,7 +1811,7 @@ GstStream::doVideoData (GstBuffer * const buffer)
 
         PagePool::PageListHead page_list;
 
-        if (enable_prechunking) {
+        if (channel_opts->enable_prechunking) {
             RtmpConnection::PrechunkContext prechunk_ctx (5 /* initial_offset: FLV AVC header length */);
             RtmpConnection::fillPrechunkedPages (&prechunk_ctx,
                                                  ConstMemory (GST_BUFFER_DATA (avc_codec_data_buffer),
@@ -1354,7 +1830,7 @@ GstStream::doVideoData (GstBuffer * const buffer)
 
 	VideoStream::VideoMessage msg;
 	msg.timestamp_nanosec = timestamp_nanosec;
-	msg.prechunk_size = (enable_prechunking ? RtmpConnection::PrechunkSize : 0);
+	msg.prechunk_size = (channel_opts->enable_prechunking ? RtmpConnection::PrechunkSize : 0);
 	msg.frame_type = VideoStream::VideoFrameType::AvcSequenceHeader;
 	msg.codec_id = tmp_video_codec_id;
 
@@ -1432,7 +1908,7 @@ GstStream::doVideoData (GstBuffer * const buffer)
 
     PagePool::PageListHead page_list;
 
-    if (enable_prechunking) {
+    if (channel_opts->enable_prechunking) {
         Size gen_video_hdr_len = 1;
         if (tmp_video_codec_id == VideoStream::VideoCodecId::AVC)
             gen_video_hdr_len = 5;
@@ -1453,7 +1929,7 @@ GstStream::doVideoData (GstBuffer * const buffer)
 //    hexdump (errs, ConstMemory (GST_BUFFER_DATA (buffer), GST_BUFFER_SIZE (buffer)));
 
     msg.timestamp_nanosec = timestamp_nanosec;
-    msg.prechunk_size = (enable_prechunking ? RtmpConnection::PrechunkSize : 0);
+    msg.prechunk_size = (channel_opts->enable_prechunking ? RtmpConnection::PrechunkSize : 0);
 
     msg.page_pool = page_pool;
     msg.page_list = page_list;
@@ -1503,6 +1979,7 @@ GstStream::busSyncHandler (GstBus     * const /* bus */,
     logD (bus, _func, gst_message_type_get_name (GST_MESSAGE_TYPE (msg)), ", src: 0x", fmt_hex, (UintPtr) GST_MESSAGE_SRC (msg));
 
     GstStream * const self = static_cast <GstStream*> (_self);
+    logD_ (_func, "self->playbin: 0x", fmt_hex, (UintPtr) self->playbin);
 
     self->mutex.lock ();
     if (GST_MESSAGE_SRC (msg) == GST_OBJECT (self->playbin)) {
@@ -1520,15 +1997,6 @@ GstStream::busSyncHandler (GstBus     * const /* bus */,
 		if (pending_state == GST_STATE_VOID_PENDING) {
 		    if (new_state == GST_STATE_PAUSED) {
 			logD (bus, _func, "PAUSED");
-
-#if 0
-			bool do_seek = false;
-			Time initial_seek = self->initial_seek;
-			if (self->initial_seek_pending) {
-			    self->initial_seek_pending = false;
-			    do_seek = true;
-			}
-#endif
 
 			if (self->initial_seek_pending) {
                             logD_ (_func, "setting 'initial_seek_pending' to 'false'");
@@ -1556,42 +2024,6 @@ GstStream::busSyncHandler (GstBus     * const /* bus */,
 			    self->frontend.call (self->frontend->statusEvent);
 
 			goto _return;
-
-#if 0
-#if 0
-			GstElement * const tmp_playbin = self->playbin;
-			gst_object_ref (tmp_playbin);
-#endif
-			self->mutex.unlock ();
-
-			// TODO This looks like a minor race. Another seek may be requested
-			//      at the same time.
-			if (do_seek && initial_seek > 0) {
-			    seek_pending = true;
-//			    goto _return;
-#if 0
-			    logD_ (_func, "Calling gst_element_seek_simple()");
-			    if (!gst_element_seek_simple (tmp_playbin,
-							  GST_FORMAT_TIME,
-							  (GstSeekFlags) (GST_SEEK_FLAG_FLUSH | GST_SEEK_FLAG_KEY_UNIT),
-							  (GstClockTime) initial_seek * 1000000000LL))
-			    {
-				logE_ (_func, "Seek failed");
-			    }
-			    logD_ (_func, "gst_element_seek_simple() returned");
-#endif
-			} else {
-			    play_pending = true;
-			}
-
-#if 0
-			if (gst_element_set_state (tmp_playbin, GST_STATE_PLAYING) == GST_STATE_CHANGE_FAILURE)
-			    logE_ (_func, "gst_element_set_state() failed (PLAYING)");
-
-			gst_object_unref (tmp_playbin);
-#endif
-			goto _return;
-#endif
 		    } else
 		    if (new_state == GST_STATE_PLAYING) {
 			logD (bus, _func, "PLAYING");
@@ -1774,10 +2206,11 @@ GstStream::doCreatePipeline ()
 {
     logD (pipeline, _this_func_);
 
-    if (is_chain)
+    if (channel_opts->is_chain)
 	createPipelineForChainSpec ();
     else
-	createPipelineForUri ();
+//	createPipelineForUri ();
+	createSmartPipelineForUri ();
 }
 
 void
@@ -1958,7 +2391,7 @@ GstStream::reportStatusEvents ()
 void
 GstStream::getTrafficStats (TrafficStats * const ret_traffic_stats)
 {
-  StateMutexLock l (mutex);
+  StateMutexLock l (&mutex);
 
     ret_traffic_stats->rx_bytes = rx_bytes;
     ret_traffic_stats->rx_audio_bytes = rx_audio_bytes;
@@ -1974,41 +2407,21 @@ GstStream::resetTrafficStats ()
 }
 
 mt_const void
-GstStream::init (ConstMemory   const stream_name,
-		 ConstMemory   const stream_spec,
-		 bool          const is_chain,
-		 Timers      * const timers,
+GstStream::init (Timers      * const timers,
 		 PagePool    * const page_pool,
 		 VideoStream * const video_stream,
 		 VideoStream * const mix_video_stream,
 		 Time          const initial_seek,
-		 bool          const send_metadata,
-                 bool          const enable_prechunking,
-		 Uint64        const default_width,
-		 Uint64        const default_height,
-		 Uint64        const default_bitrate,
-		 Time          const no_video_timeout)
+                 ChannelOptions * const channel_opts)
 {
     logD (pipeline, _this_func_);
-
-    this->stream_name = grab (new String (stream_name));
-
-    this->stream_spec = grab (new String (stream_spec));
-    this->is_chain = is_chain;
 
     this->timers = timers;
     this->page_pool = page_pool;
     this->video_stream = video_stream;
     this->mix_video_stream = mix_video_stream;
 
-    this->send_metadata = send_metadata;
-    this->enable_prechunking = enable_prechunking;
-
-    this->default_width = default_width;
-    this->default_height = default_height;
-    this->default_bitrate = default_bitrate;
-
-    this->no_video_timeout = no_video_timeout;
+    this->channel_opts = channel_opts;
 
     this->initial_seek = initial_seek;
     if (initial_seek == 0)
@@ -2058,22 +2471,14 @@ GstStream::GstStream ()
       mix_audio_caps (NULL),
       mix_video_caps (NULL),
 
-      is_chain (false),
-
-      send_metadata (false),
-      enable_prechunking (false),
-
-      default_width   (0),
-      default_height  (0),
-      default_bitrate (0),
-
-      no_video_timeout (30),
-
       no_video_timer (NULL),
 
       playbin (NULL),
       audio_probe_id (0),
       video_probe_id (0),
+
+      got_audio_pad (false),
+      got_video_pad (false),
 
       mix_audio_src (NULL),
       mix_video_src (NULL),

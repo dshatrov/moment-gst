@@ -1,5 +1,5 @@
 /*  Moment-Gst - GStreamer support module for Moment Video Server
-    Copyright (C) 2011 Dmitry Shatrov
+    Copyright (C) 2011-2013 Dmitry Shatrov
 
     This program is free software; you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -17,8 +17,8 @@
 */
 
 
-#ifndef __MOMENT_GST__MOMENT_GST_MODULE__H__
-#define __MOMENT_GST__MOMENT_GST_MODULE__H__
+#ifndef MOMENT_GST__MOMENT_GST_MODULE__H__
+#define MOMENT_GST__MOMENT_GST_MODULE__H__
 
 
 #include <moment/libmoment.h>
@@ -89,21 +89,10 @@ private:
     mt_const Timers *timers;
     mt_const PagePool *page_pool;
 
-    mt_const bool send_metadata;
-    mt_const bool enable_prechunking;
-    mt_const bool keep_video_streams;
-    mt_const bool continuous_playback;
-    mt_const bool default_connect_on_demand;
-    mt_const Time default_connect_on_demand_timeout;
     mt_const bool serve_playlist_json;
     mt_const StRef<String> playlist_json_protocol;
 
-    mt_const Uint64 default_width;
-    mt_const Uint64 default_height;
-    mt_const Uint64 default_bitrate;
-
-    mt_const Time no_video_timeout;
-    mt_const Uint64 min_playlist_duration_sec;
+    mt_const Ref<ChannelOptions> default_channel_opts;
 
     mt_mutex (mutex) ChannelEntryHash channel_entry_hash;
     mt_mutex (mutex) RecorderEntryHash recorder_entry_hash;
@@ -128,7 +117,6 @@ private:
 
     mt_iface (HttpService::Frontend)
     mt_begin
-
       static HttpService::HttpHandler admin_http_handler;
 
       static Result adminHttpRequest (HttpRequest  * mt_nonnull req,
@@ -144,33 +132,14 @@ private:
 				 Memory const &msg_body,
 				 void        ** mt_nonnull ret_msg_data,
 				 void         *_self);
-
     mt_end
 
-    void createPlaylistChannel (ConstMemory  channel_name,
-                                ConstMemory  channel_title,
-				ConstMemory  channel_desc,
-				ConstMemory  playlist_filename,
-                                bool         no_audio,
-                                bool         no_video,
-				bool         recording,
-				ConstMemory  record_filename,
-                                bool         connect_on_demand,
-                                Time         connect_on_demand_timeout,
-                                PushAgent   *push_agent = NULL);
+    void createPlaylistChannel (ConstMemory     playlist_filename,
+                                ChannelOptions *channel_opts,
+                                PushAgent      *push_agent = NULL);
 
-    void createStreamChannel (ConstMemory  stream_name,
-                              ConstMemory  channel_title,
-			      ConstMemory  channel_desc,
-			      ConstMemory  stream_spec,
-			      bool         is_chain,
-                              bool         no_audio,
-                              bool         no_video,
-			      bool         recording,
-			      ConstMemory  record_filename,
-                              bool         connect_on_demand,
-                              Time         connect_on_demand_timeout,
-                              PushAgent   *push_agent = NULL);
+    void createStreamChannel (ChannelOptions *channel_opts,
+                              PushAgent      *push_agent = NULL);
 
     void createDummyChannel (ConstMemory  channel_name,
                              ConstMemory  channel_title,
@@ -202,5 +171,5 @@ public:
 }
 
 
-#endif /* __MOMENT_GST__MOMENT_GST_MODULE__H__ */
+#endif /* MOMENT_GST__MOMENT_GST_MODULE__H__ */
 

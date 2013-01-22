@@ -1,5 +1,5 @@
 /*  Moment-Gst - GStreamer support module for Moment Video Server
-    Copyright (C) 2011 Dmitry Shatrov
+    Copyright (C) 2011-2013 Dmitry Shatrov
 
     This program is free software; you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -17,8 +17,8 @@
 */
 
 
-#ifndef __MOMENT__GST_STREAM__H__
-#define __MOMENT__GST_STREAM__H__
+#ifndef MOMENT__GST_STREAM__H__
+#define MOMENT__GST_STREAM__H__
 
 
 #include <libmary/types.h>
@@ -26,6 +26,7 @@
 #include <gst/app/gstappsrc.h>
 
 #include <moment/libmoment.h>
+#include <moment-gst/channel_options.h>
 
 
 namespace MomentGst {
@@ -37,6 +38,10 @@ class GstStream : public Object
 {
 private:
     StateMutex mutex;
+
+    typedef gboolean (*MediaDataCallback) (GstPad    *pad,
+                                           GstBuffer *buffer,
+                                           gpointer   _self);
 
 public:
     struct Frontend {
@@ -65,8 +70,7 @@ private:
         mt_const ItemType item_type;
     };
 
-    // For log lines.
-    mt_const Ref<String> stream_name;
+    mt_const Ref<ChannelOptions> channel_opts;
 
     mt_const DataDepRef<Timers> timers;
     mt_const DataDepRef<PagePool> page_pool;
@@ -76,18 +80,6 @@ private:
 
     mt_const GstCaps *mix_audio_caps;
     mt_const GstCaps *mix_video_caps;
-
-    mt_const Ref<String> stream_spec;
-    mt_const bool is_chain;
-
-    mt_const bool send_metadata;
-    mt_const bool enable_prechunking;
-
-    mt_const Uint64 default_width;
-    mt_const Uint64 default_height;
-    mt_const Uint64 default_bitrate;
-
-    mt_const Time no_video_timeout;
 
     mt_const Ref<Thread> workqueue_thread;
 
@@ -102,6 +94,9 @@ private:
       GstElement *playbin;
       gulong audio_probe_id;
       gulong video_probe_id;
+
+      bool got_audio_pad;
+      bool got_video_pad;
 
       GstAppSrc *mix_audio_src;
       GstAppSrc *mix_video_src;
@@ -184,6 +179,7 @@ private:
 
     void createPipelineForChainSpec ();
     void createPipelineForUri ();
+    void createSmartPipelineForUri ();
 
     void doCreatePipeline ();
     void doReleasePipeline ();
@@ -231,6 +227,31 @@ private:
     static GstBusSyncReply busSyncHandler (GstBus     *bus,
 					   GstMessage *msg,
 					   gpointer    _self);
+
+    static gboolean decodebinAutoplugContinue (GstElement *bin,
+                                               GstPad     *pad,
+                                               GstCaps    *caps,
+                                               gpointer    _self);
+
+    static void decodebinPadAdded (GstElement *element,
+                                   GstPad     *new_pad,
+                                   gpointer    _self);
+
+    mt_mutex (mutex) void doSetPad (GstPad            *pad,
+                                    ConstMemory        sink_el_name,
+                                    MediaDataCallback  media_data_cb,
+                                    ConstMemory        chain);
+
+    void doSetAudioPad (GstPad      *pad,
+                        ConstMemory  chain);
+
+    void doSetVideoPad (GstPad      *pad,
+                        ConstMemory  chain);
+
+    void setRawAudioPad (GstPad *pad);
+    void setRawVideoPad (GstPad *pad);
+    void setAudioPad (GstPad *pad);
+    void setVideoPad (GstPad *pad);
 
     static void noVideoTimerTick (void *_self);
 
@@ -286,20 +307,12 @@ public:
 	this->frontend = frontend;
     }
 
-    mt_const void init (ConstMemory     stream_name,
-			ConstMemory     stream_spec,
-			bool            is_chain,
-			Timers         *timers,
+    mt_const void init (Timers         *timers,
 			PagePool       *page_pool,
 			VideoStream    *video_stream,
 			VideoStream    *mix_video_stream,
 			Time            initial_seek,
-			bool            send_metadata,
-                        bool            enable_prechunking,
-			Uint64          default_width,
-			Uint64          default_height,
-			Uint64          default_bitrate,
-			Time            no_video_timeout);
+                        ChannelOptions *channel_opts);
 
     GstStream ();
 
@@ -309,5 +322,5 @@ public:
 }
 
 
-#endif /* __MOMENT__GST_STREAM__H__ */
+#endif /* MOMENT__GST_STREAM__H__ */
 
