@@ -131,9 +131,15 @@ public:
 
     void setSingleItem (ConstMemory const stream_spec,
 			bool        const is_chain,
-                        bool        const force_transcode)
+                        bool        const force_transcode,
+                        bool        const force_transcode_audio,
+                        bool        const force_transcode_video)
     {
-	playback.setSingleItem (stream_spec, is_chain, force_transcode);
+	playback.setSingleItem (stream_spec,
+                                is_chain,
+                                force_transcode,
+                                force_transcode_audio,
+                                force_transcode_video);
     }
 
     Result loadPlaylistFile (ConstMemory   const filename,

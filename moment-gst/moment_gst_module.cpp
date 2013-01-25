@@ -225,7 +225,9 @@ MomentGstModule::createStreamChannel (ChannelOptions * const channel_opts,
 
     channel->setSingleItem (channel_opts->stream_spec->mem(),
                             channel_opts->is_chain,
-                            channel_opts->force_transcode);
+                            channel_opts->force_transcode,
+                            channel_opts->force_transcode_audio,
+                            channel_opts->force_transcode_video);
 
     if (channel_opts->recording) {
 	createChannelRecorder (channel_opts->channel_name->mem(),
@@ -265,7 +267,11 @@ MomentGstModule::createDummyChannel (ConstMemory   const channel_name,
     mutex.unlock ();
     channel_set.addChannel (channel, channel_name);
 
-    channel->setSingleItem (ConstMemory(), true /* is_chain */, false /* force_transcode */);
+    channel->setSingleItem (ConstMemory(),
+                            true  /* is_chain */,
+                            false /* force_transcode */,
+                            false /* force_transcode_audio */,
+                            false /* force_transcode_video */);
 }
 
 void
@@ -1688,18 +1694,24 @@ MomentGstModule::parseStreamsConfigSection ()
             opts->connect_on_demand_timeout = connect_on_demand_timeout;
 
 	    if (chain && !chain->isNull()) {
+                logD_ (_func, "chain, channel \"", opts->channel_name, "\"");
+
                 opts->stream_spec = st_grab (new (std::nothrow) String (chain->mem()));
                 opts->is_chain = true;
 
 		createStreamChannel (opts, push_agent);
 	    } else
 	    if (uri && !uri->isNull()) {
+                logD_ (_func, "uri, channel \"", opts->channel_name, "\"");
+
                 opts->stream_spec = st_grab (new (std::nothrow) String (uri->mem()));
                 opts->is_chain = false;
 
 		createStreamChannel (opts, push_agent);
 	    } else
 	    if (playlist && !playlist->isNull()) {
+                logD_ (_func, "playlist, channel \"", opts->channel_name, "\"");
+
 		createPlaylistChannel (playlist->mem(),
                                        opts,
                                        push_agent);
@@ -2059,10 +2071,19 @@ MomentGstModule::init (MomentServer * const moment)
 	}
     }
 
+    // Deprecated in favor of "mod_gst_admin" prefix.
     moment->getAdminHttpService()->addHttpHandler (
 	    CbDesc<HttpService::HttpHandler> (
 		    &admin_http_handler, this /* cb_data */, NULL /* coderef_container */),
 	    "moment_admin",
+	    true    /* preassembly */,
+	    1 << 20 /* 1 Mb */ /* preassembly_limit */,
+	    true    /* parse_body_params */);
+
+    moment->getAdminHttpService()->addHttpHandler (
+	    CbDesc<HttpService::HttpHandler> (
+		    &admin_http_handler, this /* cb_data */, NULL /* coderef_container */),
+	    "mod_gst_admin",
 	    true    /* preassembly */,
 	    1 << 20 /* 1 Mb */ /* preassembly_limit */,
 	    true    /* parse_body_params */);

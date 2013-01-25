@@ -84,11 +84,11 @@ GstStream::workqueueThreadFunc (void * const _self)
 void
 GstStream::createPipelineForChainSpec ()
 {
-    logD (chains, _func, channel_opts->stream_spec);
+    logD (chains, _func, stream_spec);
 
-    assert (channel_opts->is_chain);
+    assert (is_chain);
 
-    if (!channel_opts->stream_spec->mem().len())
+    if (!stream_spec->mem().len())
 	return;
 
     GstElement *chain_el = NULL;
@@ -100,7 +100,7 @@ GstStream::createPipelineForChainSpec ()
 
   {
     GError *error = NULL;
-    chain_el = gst_parse_launch (channel_opts->stream_spec->cstr(), &error);
+    chain_el = gst_parse_launch (stream_spec->cstr(), &error);
     if (!chain_el) {
 	if (error) {
 	    logE_ (_func, "gst_parse_launch() failed: ", error->code,
@@ -126,7 +126,7 @@ GstStream::createPipelineForChainSpec ()
 	    GstPad * const pad = gst_element_get_static_pad (in_stats_el, "sink");
 	    if (!pad) {
 		logE_ (_func, "element called \"in_stats\" doesn't have a \"sink\" "
-		       "pad. Chain spec: ", channel_opts->stream_spec);
+		       "pad. Chain spec: ", stream_spec);
 		goto _failure;
 	    }
 
@@ -147,7 +147,7 @@ GstStream::createPipelineForChainSpec ()
 	    GstPad * const pad = gst_element_get_static_pad (audio_el, "sink");
 	    if (!pad) {
 		logE_ (_func, "element called \"audio\" doesn't have a \"sink\" "
-		       "pad. Chain spec: ", channel_opts->stream_spec);
+		       "pad. Chain spec: ", stream_spec);
 		goto _failure;
 	    }
 
@@ -178,7 +178,7 @@ GstStream::createPipelineForChainSpec ()
 	} else {
 	    logW_ (_func, "chain \"", channel_opts->channel_name, "\" does not contain "
 		   "an element named \"audio\". There'll be no audio "
-		   "for the stream. Chain spec: ", channel_opts->stream_spec);
+		   "for the stream. Chain spec: ", stream_spec);
 	}
     }
 
@@ -188,7 +188,7 @@ GstStream::createPipelineForChainSpec ()
 	    GstPad * const pad = gst_element_get_static_pad (video_el, "sink");
 	    if (!pad) {
 		logE_ (_func, "element called \"video\" doesn't have a \"sink\" "
-		       "pad. Chain spec: ", channel_opts->stream_spec);
+		       "pad. Chain spec: ", stream_spec);
 		goto _failure;
 	    }
 
@@ -205,7 +205,7 @@ GstStream::createPipelineForChainSpec ()
 	} else {
 	    logW_ (_func, "chain \"", channel_opts->channel_name, "\" does not contain "
 		   "an element named \"video\". There'll be no video "
-		   "for the stream. Chain spec: ", channel_opts->stream_spec);
+		   "for the stream. Chain spec: ", stream_spec);
 	}
     }
 
@@ -254,9 +254,9 @@ GstStream::createPipelineForUri ()
 {
     logD (pipeline, _this_func_);
 
-    assert (!channel_opts->is_chain);
+    assert (!is_chain);
 
-    if (!channel_opts->stream_spec->mem().len())
+    if (!stream_spec->mem().len())
 	return;
 
     GstElement *playbin           = NULL,
@@ -473,9 +473,9 @@ GstStream::createPipelineForUri ()
     g_object_set (G_OBJECT (playbin), "video-sink", video_encoder_bin, NULL);
     video_encoder_bin = NULL;
 
-    g_object_set (G_OBJECT (playbin), "uri", channel_opts->stream_spec->cstr(), NULL);
+    g_object_set (G_OBJECT (playbin), "uri", stream_spec->cstr(), NULL);
 
-    // TODO got_video, got_auido -?
+    // TODO got_video, got_audio -?
 
     if (!mt_unlocks (mutex) setPipelinePlaying ()) {
 	mutex.lock ();
@@ -516,10 +516,12 @@ GstStream::createSmartPipelineForUri ()
 {
     logD_ (_this_func_);
 
-    assert (!channel_opts->is_chain);
+    assert (!is_chain);
 
-    if (channel_opts->stream_spec->mem().len() == 0)
+    if (stream_spec->mem().len() == 0) {
+        logE_ (_this_func, "URI not specified for channel \"", channel_opts->channel_name, "\"");
         return;
+    }
 
     GstElement *pipeline  = NULL,
                *decodebin = NULL;
@@ -529,8 +531,12 @@ GstStream::createSmartPipelineForUri ()
     got_audio_pad = false;
     got_video_pad = false;
 
-    if (stream_closed)
+    if (stream_closed) {
+        logE_ (_this_func, "stream closed, channel \"", channel_opts->channel_name, "\"");
         goto _failure;
+    }
+
+    logD_ (_func, "uri: ", stream_spec);
 
   {
     pipeline = gst_pipeline_new ("pipeline");
@@ -550,7 +556,7 @@ GstStream::createSmartPipelineForUri ()
     gst_object_ref (this->playbin);
 
     gst_bin_add_many (GST_BIN (pipeline), decodebin, NULL);
-    g_object_set (G_OBJECT (decodebin), "uri", channel_opts->stream_spec->cstr(), NULL);
+    g_object_set (G_OBJECT (decodebin), "uri", stream_spec->cstr(), NULL);
     decodebin = NULL;
 
     if (!mt_unlocks (mutex) setPipelinePlaying ()) {
@@ -689,14 +695,14 @@ GstStream::decodebinAutoplugContinue (GstElement * const /* bin */,
         g_free (str);
     }
 
-    if (!self->channel_opts->force_transcode && !self->channel_opts->force_transcode_audio) {
+    if (!self->force_transcode && !self->force_transcode_audio) {
         if (isMpegAudioCaps (caps)) {
             logD_ (_func, "autoplugged mpeg audio");
             return FALSE;
         }
     }
 
-    if (!self->channel_opts->force_transcode && !self->channel_opts->force_transcode_video) {
+    if (!self->force_transcode && !self->force_transcode_video) {
         if (isH264VideoCaps (caps)) {
             logD_ (_func, "autoplugged h.264 video");
             return FALSE;
@@ -2206,7 +2212,7 @@ GstStream::doCreatePipeline ()
 {
     logD (pipeline, _this_func_);
 
-    if (channel_opts->is_chain)
+    if (is_chain)
 	createPipelineForChainSpec ();
     else
 //	createPipelineForUri ();
@@ -2412,7 +2418,12 @@ GstStream::init (Timers      * const timers,
 		 VideoStream * const video_stream,
 		 VideoStream * const mix_video_stream,
 		 Time          const initial_seek,
-                 ChannelOptions * const channel_opts)
+                 ChannelOptions * const channel_opts,
+                 ConstMemory      const stream_spec,
+                 bool             const is_chain,
+                 bool             const force_transcode,
+                 bool             const force_transcode_audio,
+                 bool             const force_transcode_video)
 {
     logD (pipeline, _this_func_);
 
@@ -2422,6 +2433,12 @@ GstStream::init (Timers      * const timers,
     this->mix_video_stream = mix_video_stream;
 
     this->channel_opts = channel_opts;
+
+    this->stream_spec     = st_grab (new (std::nothrow) String (stream_spec));
+    this->is_chain        = is_chain;
+    this->force_transcode = force_transcode;
+    this->force_transcode_audio = force_transcode_audio;
+    this->force_transcode_video = force_transcode_video;
 
     this->initial_seek = initial_seek;
     if (initial_seek == 0)
@@ -2462,7 +2479,12 @@ GstStream::init (Timers      * const timers,
 }
 
 GstStream::GstStream ()
-    : timers    (this /* coderef_container */),
+    : is_chain        (false),
+      force_transcode (false),
+      force_transcode_audio (false),
+      force_transcode_video (false),
+       
+      timers    (this /* coderef_container */),
       page_pool (this /* coderef_container */),
 
       video_stream (NULL),

@@ -30,7 +30,7 @@
 using namespace M;
 using namespace Moment;
 
-static LogGroup libMary_logGroup_playlist ("MomentGst.playlist", LogLevel::I);
+static LogGroup libMary_logGroup_playlist ("mod_gst.playlist", LogLevel::D);
 
 namespace MomentGst {
 
@@ -655,11 +655,15 @@ static void reportXmlParsingError (ConstMemory   const filename,
 void
 Playlist::setSingleItem (ConstMemory const stream_spec,
 			 bool        const is_chain,
-                         bool        const force_transcode)
+                         bool        const force_transcode,
+                         bool        const force_transcode_audio,
+                         bool        const force_transcode_video)
 {
     Item * const item = new (std::nothrow) Item;
     assert (item);
     item->force_transcode = force_transcode;
+    item->force_transcode_audio = force_transcode_audio;
+    item->force_transcode_video = force_transcode_video;
 
     if (is_chain)
 	item->chain_spec = grab (new String (stream_spec));

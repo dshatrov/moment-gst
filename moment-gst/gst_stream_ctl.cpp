@@ -201,28 +201,17 @@ GstStreamCtl::createStream (Time const initial_seek)
 	stream_start_time = getTime();
 
     gst_stream = grab (new (std::nothrow) GstStream);
-    gst_stream->init (
-#if 0
-                      stream_name->mem(),
-		      stream_spec->mem(),
-		      is_chain,
-                      force_transcode,
-#endif
-		      timers,
+    gst_stream->init (timers,
 		      page_pool,
 		      bind_stream,
 		      moment->getMixVideoStream(),
 		      initial_seek,
-                      channel_opts
-#if 0
-		      send_metadata,
-                      enable_prechunking,
-		      default_width,
-		      default_height,
-		      default_bitrate,
-		      no_video_timeout
-#endif
-                      );
+                      channel_opts,
+		      stream_spec->mem(),
+		      is_chain,
+                      force_transcode,
+                      force_transcode_audio,
+                      force_transcode_video);
 
     gst_stream->setFrontend (CbDesc<GstStream::Frontend> (
 	    &gst_stream_frontend,
@@ -486,11 +475,13 @@ void
 GstStreamCtl::beginVideoStream (ConstMemory      const stream_spec,
 				bool             const is_chain,
                                 bool             const force_transcode,
+                                bool             const force_transcode_audio,
+                                bool             const force_transcode_video,
 				void           * const stream_ticket,
 				VirtReferenced * const stream_ticket_ref,
 				Time             const seek)
 {
-    logD (ctl, _this_func_);
+    logD (ctl, _this_func, "is_chain: ", is_chain);
 
     mutex.lock ();
 
@@ -500,6 +491,8 @@ GstStreamCtl::beginVideoStream (ConstMemory      const stream_spec,
     this->stream_spec = grab (new (std::nothrow) String (stream_spec));
     this->is_chain = is_chain;
     this->force_transcode = force_transcode;
+    this->force_transcode_audio = force_transcode_audio;
+    this->force_transcode_video = force_transcode_video;
 
     this->stream_ticket = stream_ticket;
     this->stream_ticket_ref = stream_ticket_ref;

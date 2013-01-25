@@ -110,7 +110,9 @@ public:
 
     void setSingleItem (ConstMemory stream_spec,
 			bool        is_chain,
-                        bool        force_transcode);
+                        bool        force_transcode,
+                        bool        force_transcode_audio,
+                        bool        force_transcode_video);
 
     void setSingleChannelRecorder (ConstMemory channel_name);
 

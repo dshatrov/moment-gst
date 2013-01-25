@@ -83,6 +83,8 @@ private:
     mt_mutex (mutex) Ref<String> stream_spec;
     mt_mutex (mutex) bool is_chain;
     mt_mutex (mutex) bool force_transcode;
+    mt_mutex (mutex) bool force_transcode_audio;
+    mt_mutex (mutex) bool force_transcode_video;
 
   // Video stream state
 
@@ -175,6 +177,8 @@ public:
     void beginVideoStream (ConstMemory     stream_spec,
 			   bool            is_chain,
                            bool            force_transcode,
+                           bool            force_transcode_audio,
+                           bool            force_transcode_video,
 			   void           *stream_ticket,
 			   VirtReferenced *stream_ticket_ref,
 			   Time            seek = 0);

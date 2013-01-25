@@ -83,6 +83,8 @@ Channel::startPlaybackItem (Playlist::Item          * const item,
     bool const got_chain_spec = item->chain_spec && !item->chain_spec.isNull();
     bool const got_uri = item->uri && !item->uri.isNull();
 
+    logD_ (_self_func, "got_chain_spec: ", got_chain_spec, ", got_uri: ", got_uri);
+
     if (got_chain_spec && got_uri) {
 	logW_ (_func, "Both chain spec and uri are specified for a playlist item. "
 	       "Ignoring the uri.");
@@ -93,6 +95,8 @@ Channel::startPlaybackItem (Playlist::Item          * const item,
 	self->stream_ctl->beginVideoStream (item->chain_spec->mem(),
 					    true /* is_chain */,
                                             item->force_transcode,
+                                            item->force_transcode_audio,
+                                            item->force_transcode_video,
 					    advance_ticket /* stream_ticket */,
 					    advance_ticket /* stream_ticket_ref */,
 					    seek);
@@ -101,6 +105,8 @@ Channel::startPlaybackItem (Playlist::Item          * const item,
 	self->stream_ctl->beginVideoStream (item->uri->mem(),
 					    false /* is_chain */,
                                             item->force_transcode,
+                                            item->force_transcode_audio,
+                                            item->force_transcode_video,
 					    advance_ticket /* stream_ticket */,
 					    advance_ticket /* stream_ticket_ref */,
 					    seek);
