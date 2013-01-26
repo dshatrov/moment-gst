@@ -25,12 +25,12 @@ using namespace Moment;
 
 namespace MomentGst {
 
-static LogGroup libMary_logGroup_chains   ("moment-gst_chains",   LogLevel::I);
-static LogGroup libMary_logGroup_pipeline ("moment-gst_pipeline", LogLevel::D);
-static LogGroup libMary_logGroup_stream   ("moment-gst_stream",   LogLevel::D);
-static LogGroup libMary_logGroup_bus      ("moment-gst_bus",      LogLevel::D);
-static LogGroup libMary_logGroup_frames   ("moment-gst_frames",   LogLevel::E); // E is the default
-static LogGroup libMary_logGroup_novideo  ("moment-gst_novideo",  LogLevel::I);
+static LogGroup libMary_logGroup_chains   ("mod_gst.chains",   LogLevel::I);
+static LogGroup libMary_logGroup_pipeline ("mod_gst.pipeline", LogLevel::D);
+static LogGroup libMary_logGroup_stream   ("mod_gst.stream",   LogLevel::D);
+static LogGroup libMary_logGroup_bus      ("mod_gst.bus",      LogLevel::D);
+static LogGroup libMary_logGroup_frames   ("mod_gst.frames",   LogLevel::E); // E is the default
+static LogGroup libMary_logGroup_novideo  ("mod_gst.novideo",  LogLevel::I);
 
 void
 GstStream::workqueueThreadFunc (void * const _self)
@@ -2413,11 +2413,12 @@ GstStream::resetTrafficStats ()
 }
 
 mt_const void
-GstStream::init (Timers      * const timers,
-		 PagePool    * const page_pool,
-		 VideoStream * const video_stream,
-		 VideoStream * const mix_video_stream,
-		 Time          const initial_seek,
+GstStream::init (CbDesc<MediaSource::Frontend> const &frontend,
+                 Timers         * const timers,
+		 PagePool       * const page_pool,
+		 VideoStream    * const video_stream,
+		 VideoStream    * const mix_video_stream,
+		 Time             const initial_seek,
                  ChannelOptions * const channel_opts,
                  ConstMemory      const stream_spec,
                  bool             const is_chain,
@@ -2426,6 +2427,8 @@ GstStream::init (Timers      * const timers,
                  bool             const force_transcode_video)
 {
     logD (pipeline, _this_func_);
+
+    this->frontend = frontend;
 
     this->timers = timers;
     this->page_pool = page_pool;

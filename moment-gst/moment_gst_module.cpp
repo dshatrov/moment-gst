@@ -98,7 +98,7 @@ MomentGstModule::updatePlaylist (ConstMemory   const channel_name,
     }
 
     Ref<String> err_msg;
-    if (!channel_entry->channel->loadPlaylistFile (
+    if (!channel_entry->channel->getPlayback()->loadPlaylistFile (
 		channel_entry->playlist_filename->mem(), keep_cur_item, &err_msg))
     {
 	mutex.unlock ();
@@ -135,7 +135,7 @@ MomentGstModule::setPosition (ConstMemory const channel_name,
 
     Result res;
     if (item_name_is_id) {
-	res = channel_entry->channel->setPosition_Id (item_name, seek);
+	res = channel_entry->channel->getPlayback()->setPosition_Id (item_name, seek);
     } else {
 	Uint32 item_idx;
 	if (!strToUint32_safe (item_name, &item_idx)) {
@@ -144,7 +144,7 @@ MomentGstModule::setPosition (ConstMemory const channel_name,
 	    return Result::Failure;
 	}
 
-	res = channel_entry->channel->setPosition_Index (item_idx, seek);
+	res = channel_entry->channel->getPlayback()->setPosition_Index (item_idx, seek);
     }
 
     if (!res) {
@@ -185,7 +185,7 @@ MomentGstModule::createPlaylistChannel (ConstMemory      const playlist_filename
 
     {
 	Ref<String> err_msg;
-	if (!channel->loadPlaylistFile (playlist_filename, false /* keep_cur_item */, &err_msg))
+	if (!channel->getPlayback()->loadPlaylistFile (playlist_filename, false /* keep_cur_item */, &err_msg))
 	    logE_ (_func, "Could not parse playlist file \"", playlist_filename, "\":\n", err_msg);
     }
 
@@ -223,11 +223,11 @@ MomentGstModule::createStreamChannel (ChannelOptions * const channel_opts,
     mutex.unlock ();
     channel_set.addChannel (channel, channel_opts->channel_name->mem());
 
-    channel->setSingleItem (channel_opts->stream_spec->mem(),
-                            channel_opts->is_chain,
-                            channel_opts->force_transcode,
-                            channel_opts->force_transcode_audio,
-                            channel_opts->force_transcode_video);
+    channel->getPlayback()->setSingleItem (channel_opts->stream_spec->mem(),
+                                           channel_opts->is_chain,
+                                           channel_opts->force_transcode,
+                                           channel_opts->force_transcode_audio,
+                                           channel_opts->force_transcode_video);
 
     if (channel_opts->recording) {
 	createChannelRecorder (channel_opts->channel_name->mem(),
@@ -267,11 +267,11 @@ MomentGstModule::createDummyChannel (ConstMemory   const channel_name,
     mutex.unlock ();
     channel_set.addChannel (channel, channel_name);
 
-    channel->setSingleItem (ConstMemory(),
-                            true  /* is_chain */,
-                            false /* force_transcode */,
-                            false /* force_transcode_audio */,
-                            false /* force_transcode_video */);
+    channel->getPlayback()->setSingleItem (ConstMemory(),
+                                           true  /* is_chain */,
+                                           false /* force_transcode */,
+                                           false /* force_transcode_audio */,
+                                           false /* force_transcode_video */);
 }
 
 void
@@ -429,7 +429,7 @@ MomentGstModule::httpGetChannelsStat (HttpRequest  * const mt_nonnull req,
 	    if (!channel_entry->channel)
 		continue;
 
-	    GstStreamCtl::TrafficStats traffic_stats;
+	    Channel::TrafficStats traffic_stats;
 	    channel_entry->channel->getTrafficStats (&traffic_stats);
 	    Uint64 const rx_bytes = traffic_stats.rx_bytes;
 
@@ -1839,6 +1839,36 @@ MomentGstModule::parseRecordingsConfigSection ()
     }
 }
 
+Ref<MediaSource>
+MomentGstModule::createMediaSource (CbDesc<MediaSource::Frontend> const &frontend,
+                                    Timers         * const timers,
+                                    PagePool       * const page_pool,
+                                    VideoStream    * const video_stream,
+                                    VideoStream    * const mix_video_stream,
+                                    Time             const initial_seek,
+                                    ChannelOptions * const channel_opts,
+                                    ConstMemory      const stream_spec,
+                                    bool             const is_chain,
+                                    bool             const force_transcode,
+                                    bool             const force_transcode_audio,
+                                    bool             const force_transcode_video)
+{
+    Ref<GstStream> const gst_stream = grab (new (std::nothrow) GstStream);
+    gst_stream->init (frontend,
+                      timers,
+                      page_pool,
+                      video_stream,
+                      mix_video_stream,
+                      initial_seek,
+                      channel_opts,
+                      stream_spec,
+                      is_chain,
+                      force_transcode,
+                      force_transcode_audio,
+                      force_transcode_video);
+    return gst_stream;
+}
+
 // TODO Always succeeds currently.
 Result
 MomentGstModule::init (MomentServer * const moment)
@@ -1850,6 +1880,8 @@ MomentGstModule::init (MomentServer * const moment)
   // Opening video streams.
 
     MConfig::Config * const config = moment->getConfig();
+
+    moment->setMediaSourceProvider (this);
 
 #if 0
 // send_metadata implementation is wrong (racy/blocking), disabled for now.

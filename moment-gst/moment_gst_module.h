@@ -22,11 +22,7 @@
 
 
 #include <moment/libmoment.h>
-
 #include <moment-gst/gst_stream.h>
-#include <moment-gst/channel.h>
-#include <moment-gst/channel_set.h>
-#include <moment-gst/recorder.h>
 
 
 namespace MomentGst {
@@ -34,7 +30,8 @@ namespace MomentGst {
 using namespace M;
 using namespace Moment;
 
-class MomentGstModule : public Object
+class MomentGstModule : public Object,
+                        public MediaSourceProvider
 {
 private:
     StateMutex mutex;
@@ -161,6 +158,21 @@ private:
     void parseRecordingsConfigSection ();
 
 public:
+  mt_iface (MediaSourceProvider)
+    Ref<MediaSource> createMediaSource (CbDesc<MediaSource::Frontend> const &frontend,
+                                        Timers         *timers,
+                                        PagePool       *page_pool,
+                                        VideoStream    *video_stream,
+                                        VideoStream    *mix_video_stream,
+                                        Time            initial_seek,
+                                        ChannelOptions *channel_opts,
+                                        ConstMemory     stream_spec,
+                                        bool            is_chain,
+                                        bool            force_transcode,
+                                        bool            force_transcode_audio,
+                                        bool            force_transcode_video);
+  mt_iface_end
+
     Result init (MomentServer *moment);
 
     MomentGstModule ();

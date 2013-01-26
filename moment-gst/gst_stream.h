@@ -26,7 +26,6 @@
 #include <gst/app/gstappsrc.h>
 
 #include <moment/libmoment.h>
-#include <moment-gst/channel_options.h>
 
 
 namespace MomentGst {
@@ -34,7 +33,7 @@ namespace MomentGst {
 using namespace M;
 using namespace Moment;
 
-class GstStream : public Object
+class GstStream : public MediaSource
 {
 private:
     StateMutex mutex;
@@ -43,22 +42,6 @@ private:
                                            GstBuffer *buffer,
                                            gpointer   _self);
 
-public:
-    struct Frontend {
-	void (*error) (void *cb_data);
-
-	// End of stream.
-	void (*eos) (void *cb_data);
-
-	void (*noVideo) (void *cb_data);
-
-	void (*gotVideo) (void *cb_data);
-
-	// Called with gstreamer locks held.
-	void (*statusEvent) (void *cb_data);
-    };
-
-private:
     class WorkqueueItem : public Referenced
     {
     public:
@@ -177,7 +160,7 @@ private:
 
     mt_end
 
-    mt_const Cb<Frontend> frontend;
+    mt_const Cb<MediaSource::Frontend> frontend;
 
     static void workqueueThreadFunc (void *_self);
 
@@ -280,40 +263,12 @@ public:
 
     void reportStatusEvents ();
 
-    class TrafficStats
-    {
-    public:
-	Uint64 rx_bytes;
-	Uint64 rx_audio_bytes;
-	Uint64 rx_video_bytes;
-
-	void reset ()
-	{
-	    rx_bytes = 0;
-	    rx_audio_bytes = 0;
-	    rx_video_bytes = 0;
-	}
-
-#if 0
-	TrafficStats (Uint64 const rx_audio_bytes,
-		      Uint64 const rx_video_bytes)
-	    : rx_audio_bytes (rx_audio_bytes),
-	      rx_video_bytes (rx_video_bytes)
-	{
-	}
-#endif
-    };
-
     void getTrafficStats (TrafficStats *ret_traffic_stats);
 
     void resetTrafficStats ();
 
-    mt_const void setFrontend (CbDesc<Frontend> const &frontend)
-    {
-	this->frontend = frontend;
-    }
-
-    mt_const void init (Timers         *timers,
+    mt_const void init (CbDesc<MediaSource::Frontend> const &frontend,
+                        Timers         *timers,
 			PagePool       *page_pool,
 			VideoStream    *video_stream,
 			VideoStream    *mix_video_stream,

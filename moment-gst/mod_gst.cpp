@@ -1,5 +1,5 @@
 /*  Moment-Gst - GStreamer support module for Moment Video Server
-    Copyright (C) 2011 Dmitry Shatrov
+    Copyright (C) 2011-2013 Dmitry Shatrov
 
     This program is free software; you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -25,17 +25,12 @@ using namespace Moment;
 
 namespace MomentGst {
 
-static void glibLoopThreadFunc (void * const /* cb_data */)
-{
-    updateTime();
-//    logD_ (_func, "g_main_context_default(): 0x", fmt_hex, (UintPtr) g_main_context_default());
-//    logD_ (_func, "g_main_context_get_thread_default(): 0x", fmt_hex, (UintPtr) g_main_context_get_thread_default());
+static void serverDestroy (void *_gst_module);
 
-    GMainLoop * const loop = g_main_loop_new (g_main_context_default() /* same as NULL? */, FALSE);
-    g_main_loop_run (loop);
-    g_main_loop_unref (loop);
-    logI_ (_func, "done");
-}
+static MomentServer::Events const server_events = {
+    NULL /* configReload */,
+    serverDestroy
+};
 
 static void serverDestroy (void * const _gst_module)
 {
@@ -45,20 +40,33 @@ static void serverDestroy (void * const _gst_module)
     gst_module->unref ();
 }
 
-static MomentServer::Events const server_events = {
-    NULL /* configReload */,
-    serverDestroy
-};
+static void glibLoopThreadFunc (void * const /* cb_data */)
+{
+    updateTime();
 
-static void doMomentGstInit ()
+    GMainLoop * const loop = g_main_loop_new (g_main_context_default() /* same as NULL? */, FALSE);
+    g_main_loop_run (loop);
+    g_main_loop_unref (loop);
+    logI_ (_func, "done");
+}
+
+static void momentGstInit ()
 {
     logI_ (_func, "Initializing mod_gst");
+
+    {
+	Ref<Thread> const thread = grab (new Thread (
+		CbDesc<Thread::ThreadFunc> (glibLoopThreadFunc, NULL, NULL)));
+	if (!thread->spawn (false /* joinable */))
+	    logE_ (_func, "Failed to spawn glib main loop thread: ", exc->toString());
+    }
 
     MomentServer * const moment = MomentServer::getInstance();
     MConfig::Config * const config = moment->getConfig();
 
     MomentGstModule * const gst_module = new MomentGstModule;
-    moment->getEventInformer()->subscribe (CbDesc<MomentServer::Events> (&server_events, gst_module, NULL));
+    moment->getEventInformer()->subscribe (
+            CbDesc<MomentServer::Events> (&server_events, gst_module, NULL));
 
     {
 	ConstMemory const opt_name = "mod_gst/enable";
@@ -107,34 +115,6 @@ static void doMomentGstInit ()
 
     if (!gst_module->init (MomentServer::getInstance()))
 	logE_ (_func, "gst_module->init() failed");
-}
-
-// Initialization from a separate thread to cure deadlocks with glibc 1.14
-// has been tried, but did no good.
-static void momentGstInit_threadFunc (void * const /* cb_data */)
-{
-    doMomentGstInit ();
-}
-
-static void momentGstInit ()
-{
-    {
-	Ref<Thread> const thread = grab (new Thread (
-		CbDesc<Thread::ThreadFunc> (glibLoopThreadFunc, NULL, NULL)));
-	if (!thread->spawn (false /* joinable */))
-	    logE_ (_func, "Failed to spawn glib main loop thread: ", exc->toString());
-    }
-
-#if 0
-    {
-	Ref<Thread> const thread = grab (new Thread (
-		CbDesc<Thread::ThreadFunc> (momentGstInit_threadFunc, NULL, NULL)));
-	if (!thread->spawn (false /* joinable */))
-	    logE_ (_func, "Failed to spawn initializer thread: ", exc->toString());
-    }
-#endif
-
-    doMomentGstInit ();
 }
 
 static void momentGstUnload ()
