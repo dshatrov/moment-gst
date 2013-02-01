@@ -54,12 +54,7 @@ private:
     };
 
     mt_const Ref<ChannelOptions> channel_opts;
-
-    mt_const StRef<String> stream_spec;
-    mt_const bool is_chain;
-    mt_const bool force_transcode;
-    mt_const bool force_transcode_audio;
-    mt_const bool force_transcode_video;
+    mt_const Ref<PlaybackItem>   playback_item;
 
     mt_const DataDepRef<Timers> timers;
     mt_const DataDepRef<PagePool> page_pool;
@@ -274,11 +269,7 @@ public:
 			VideoStream    *mix_video_stream,
 			Time            initial_seek,
                         ChannelOptions *channel_opts,
-                        ConstMemory     stream_spec,
-                        bool            is_chain,
-                        bool            force_transcode,
-                        bool            force_transcode_audio,
-                        bool            force_transcode_video);
+                        PlaybackItem   *playback_item);
 
     GstStream ();
 

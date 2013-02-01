@@ -99,7 +99,10 @@ MomentGstModule::updatePlaylist (ConstMemory   const channel_name,
 
     Ref<String> err_msg;
     if (!channel_entry->channel->getPlayback()->loadPlaylistFile (
-		channel_entry->playlist_filename->mem(), keep_cur_item, &err_msg))
+		channel_entry->playlist_filename->mem(),
+                keep_cur_item,
+                channel_entry->channel_opts->default_item,
+                &err_msg))
     {
 	mutex.unlock ();
 	logE_ (_func, "channel->loadPlaylistFile() failed: ", err_msg);
@@ -165,6 +168,7 @@ MomentGstModule::createPlaylistChannel (ConstMemory      const playlist_filename
 {
     ChannelEntry * const channel_entry = new (std::nothrow) ChannelEntry;
     assert (channel_entry);
+    channel_entry->channel_opts = channel_opts;
 
     channel_entry->channel_name  = grab (new (std::nothrow) String (channel_opts->channel_name->mem()));
     channel_entry->channel_title = grab (new (std::nothrow) String (channel_opts->channel_title->mem()));
@@ -185,8 +189,13 @@ MomentGstModule::createPlaylistChannel (ConstMemory      const playlist_filename
 
     {
 	Ref<String> err_msg;
-	if (!channel->getPlayback()->loadPlaylistFile (playlist_filename, false /* keep_cur_item */, &err_msg))
+	if (!channel->getPlayback()->loadPlaylistFile (playlist_filename,
+                                                       false /* keep_cur_item */,
+                                                       channel_opts->default_item,
+                                                       &err_msg))
+        {
 	    logE_ (_func, "Could not parse playlist file \"", playlist_filename, "\":\n", err_msg);
+        }
     }
 
     if (channel_opts->recording) {
@@ -198,13 +207,12 @@ MomentGstModule::createPlaylistChannel (ConstMemory      const playlist_filename
 
 void
 MomentGstModule::createStreamChannel (ChannelOptions * const channel_opts,
+                                      PlaybackItem   * const playback_item,
                                       PushAgent      * const push_agent)
 {
-    logD_ (_func, "channel: ", channel_opts->channel_name, ", ",
-           channel_opts->is_chain ? "chain" : "uri", ": ",
-           channel_opts->stream_spec);
-
     ChannelEntry * const channel_entry = new (std::nothrow) ChannelEntry;
+    assert (channel_entry);
+    channel_entry->channel_opts = channel_opts;
 
     channel_entry->channel_name  = grab (new (std::nothrow) String (channel_opts->channel_name->mem()));
     channel_entry->channel_title = grab (new (std::nothrow) String (channel_opts->channel_title->mem()));
@@ -223,11 +231,7 @@ MomentGstModule::createStreamChannel (ChannelOptions * const channel_opts,
     mutex.unlock ();
     channel_set.addChannel (channel, channel_opts->channel_name->mem());
 
-    channel->getPlayback()->setSingleItem (channel_opts->stream_spec->mem(),
-                                           channel_opts->is_chain,
-                                           channel_opts->force_transcode,
-                                           channel_opts->force_transcode_audio,
-                                           channel_opts->force_transcode_video);
+    channel->getPlayback()->setSingleItem (playback_item);
 
     if (channel_opts->recording) {
 	createChannelRecorder (channel_opts->channel_name->mem(),
@@ -243,6 +247,7 @@ MomentGstModule::createDummyChannel (ConstMemory   const channel_name,
                                      PushAgent   * const push_agent)
 {
     ChannelEntry * const channel_entry = new (std::nothrow) ChannelEntry;
+    assert (channel_entry);
 
     channel_entry->channel_name  = grab (new (std::nothrow) String (channel_name));
     channel_entry->channel_title = grab (new (std::nothrow) String (channel_title));
@@ -254,24 +259,36 @@ MomentGstModule::createDummyChannel (ConstMemory   const channel_name,
     Ref<Channel> const channel = grab (new (std::nothrow) Channel);
     channel_entry->channel = channel;
 
-    Ref<ChannelOptions> const channel_opts = grab (new (std::nothrow) ChannelOptions);
-    *channel_opts = *default_channel_opts;
-    channel_opts->channel_name  = st_grab (new (std::nothrow) String (channel_name));
-    channel_opts->channel_title = st_grab (new (std::nothrow) String (channel_title));
-    channel_opts->channel_desc  = st_grab (new (std::nothrow) String (channel_desc));
+    Ref<ChannelOptions> const opts = grab (new (std::nothrow) ChannelOptions);
+    channel_entry->channel_opts = opts;
+    {
+        *opts = *default_channel_opts;
+        opts->channel_name  = st_grab (new (std::nothrow) String (channel_name));
+        opts->channel_title = st_grab (new (std::nothrow) String (channel_title));
+        opts->channel_desc  = st_grab (new (std::nothrow) String (channel_desc));
+    }
 
-    channel->init (moment, channel_opts);
+    Ref<PlaybackItem> const item = grab (new (std::nothrow) PlaybackItem);
+    opts->default_item = item;
+    {
+        *item = *default_channel_opts->default_item;
+
+        item->stream_spec = st_grab (new (std::nothrow) String);
+        item->spec_kind = PlaybackItem::SpecKind::None;
+
+        item->force_transcode = false;
+        item->force_transcode_video = false;
+        item->force_transcode_audio = false;
+    }
+
+    channel->init (moment, opts);
 
     mutex.lock ();
     channel_entry_hash.add (channel_entry);
     mutex.unlock ();
     channel_set.addChannel (channel, channel_name);
 
-    channel->getPlayback()->setSingleItem (ConstMemory(),
-                                           true  /* is_chain */,
-                                           false /* force_transcode */,
-                                           false /* force_transcode_audio */,
-                                           false /* force_transcode_video */);
+    channel->getPlayback()->setSingleItem (item);
 }
 
 void
@@ -299,8 +316,13 @@ MomentGstModule::createPlaylistRecorder (ConstMemory const recorder_name,
 
     {
 	Ref<String> err_msg;
-	if (!recorder->loadPlaylistFile (playlist_filename, false /* keep_cur_item */, &err_msg))
+	if (!recorder->loadPlaylistFile (playlist_filename,
+                                         false /* keep_cur_item */,
+                                         default_channel_opts->default_item,
+                                         &err_msg))
+        {
 	    logE_ (_func, "Could not parse recorder playlist file \"", playlist_filename, "\":\n", err_msg);
+        }
     }
 }
 
@@ -529,124 +551,9 @@ MomentGstModule::adminHttpRequest (HttpRequest  * const mt_nonnull req,
 
     MOMENT_GST__HEADERS_DATE
 
-#if 0
-    if (req->getNumPathElems() >= 2
-	&& equal (req->getPath (1), "set_channel"))
-    {
-	ConstMemory const channel_name = req->getParameter ("name");
-	if (channel_name.mem() == NULL) {
-	    logE_ (_func, "set_channel: no channel name (\"name\" parameter)\n");
-	    goto _bad_request;
-	}
-
-	// "src_" prefix indicates that only one of these parameters can be
-	// specified at a time.
-        ConstMemory       src_title    = req->getParameter ("src_title");
-	ConstMemory const src_chain    = req->getParameter ("src_chain");
-	ConstMemory const src_path     = req->getParameter ("src_path");
-	ConstMemory const src_uri      = req->getParameter ("src_uri");
-	ConstMemory const src_playlist = req->getParameter ("src_playlist");
-
-        if (src_title.len() == 0)
-            src_title = channel_name;
-
-	{
-	    logD_ (_func, "set_channel:");
-            if (src_title.len())
-                logD_ (_func, "    src_title: ", src_title);
-	    if (src_chain.len())
-		logD_ (_func, "    src_chain: ", src_chain);
-	    if (src_path.len())
-		logD_ (_func, "    src_path: ", src_path);
-	    if (src_uri.len())
-		logD_ (_func, "    src_uri: ", src_uri);
-	    if (src_playlist.len())
-		logD_ (_func, "    src_playlist: ", src_playlist);
-	}
-
-	{
-	    unsigned count = 0;
-	    if (src_chain.len())
-		++count;
-	    if (src_path.len())
-		++count;
-	    if (src_uri.len())
-		++count;
-	    if (src_playlist.len())
-		++count;
-
-	    if (count == 0) {
-		logE_ (_func, "set_channel: no video source");
-		goto _bad_request;
-	    }
-
-	    if (count > 1) {
-		logE_ (_func, "set_channel: multiple video sources in a single request");
-		goto _bad_request;
-	    }
-	}
-
-	if (src_chain.len()) {
-	    self->createStreamChannel (channel_name,
-                                       src_title,
-				       ConstMemory() /* channel_desc */,
-				       src_chain,
-				       true  /* is_chain */,
-                                       false /* no_audio */,
-                                       false /* no_video */,
-				       false /* recording */,
-				       ConstMemory() /* record_path */,
-                                       self->default_connect_on_demand,
-                                       self->default_connect_on_demand_timeout);
-	} else
-	if (src_path.len()) {
-	    self->createStreamChannel (channel_name,
-                                       src_title,
-				       ConstMemory() /* channel_desc */,
-				       makeString ("file://", src_path)->mem(),
-				       false /* is_chain */,
-                                       false /* no_audio */,
-                                       false /* no_video */,
-				       false /* recording */,
-				       ConstMemory() /* record_path */,
-                                       self->default_connect_on_demand,
-                                       self->default_connect_on_demand_timeout);
-	} else
-	if (src_uri.len()) {
-	    self->createStreamChannel (channel_name,
-                                       src_title,
-				       ConstMemory() /* channel_desc */,
-				       src_uri,
-				       false /* is_chain */,
-                                       false /* no_audio */,
-                                       false /* no_video */,
-				       false /* recording */,
-				       ConstMemory() /* record_path */,
-                                       self->default_connect_on_demand,
-                                       self->default_connect_on_demand_timeout);
-	} else
-	if (src_playlist.len()) {
-	    self->createPlaylistChannel (channel_name,
-                                         src_title,
-					 ConstMemory() /* channel_desc */,
-					 src_playlist,
-                                         false /* no_audio */,
-                                         false /* no_video */,
-					 false /* recording */,
-					 ConstMemory() /* record_path */,
-                                         self->default_connect_on_demand,
-                                         self->default_connect_on_demand_timeout);
-	}
-    } else
-    if (req->getNumPathElems() >= 2
-	&& equal (req->getPath (1), "delete_channel"))
-    {
-	// TODO
-    } else
-#endif
     if (req->getNumPathElems() == 3
-    && (equal (req->getPath (1), "update_playlist") ||
-	equal (req->getPath (1), "update_playlist_now")))
+        && (equal (req->getPath (1), "update_playlist") ||
+            equal (req->getPath (1), "update_playlist_now")))
     {
 	ConstMemory const playlist_name = req->getPath (2);
 
@@ -1257,16 +1164,22 @@ MomentGstModule::parseSourcesConfigSection ()
 	    logD_ (_func, "Stream name: ", stream_name, "; stream uri: ", stream_uri);
 
             Ref<ChannelOptions> const opts = grab (new (std::nothrow) ChannelOptions);
-            *opts = *default_channel_opts;
+            {
+                *opts = *default_channel_opts;
+                opts->channel_name  = st_grab (new (std::nothrow) String (stream_name));
+                opts->channel_title = st_grab (new (std::nothrow) String (stream_name));
+                opts->channel_desc  = st_grab (new (std::nothrow) String);
+            }
 
-            opts->channel_name  = st_grab (new (std::nothrow) String (stream_name));
-            opts->channel_title = st_grab (new (std::nothrow) String (stream_name));
-            opts->channel_desc  = st_grab (new (std::nothrow) String);
+            Ref<PlaybackItem> const item = grab (new (std::nothrow) PlaybackItem);
+            opts->default_item = item;
+            {
+                *item = *default_channel_opts->default_item;
+                item->stream_spec = st_grab (new (std::nothrow) String (stream_uri));
+                item->spec_kind = PlaybackItem::SpecKind::Uri;
+            }
 
-            opts->stream_spec = st_grab (new (std::nothrow) String (stream_uri));
-            opts->is_chain = false;
-
-	    createStreamChannel (opts);
+	    createStreamChannel (opts, item);
         }
     }
 }
@@ -1341,16 +1254,22 @@ MomentGstModule::parseChainsConfigSection ()
 	    ConstMemory const chain_spec = chain_option->getValue()->mem();
 
             Ref<ChannelOptions> const opts = grab (new (std::nothrow) ChannelOptions);
-            *opts = *default_channel_opts;
+            {
+                *opts = *default_channel_opts;
+                opts->channel_name  = st_grab (new (std::nothrow) String (stream_name));
+                opts->channel_title = st_grab (new (std::nothrow) String (stream_name));
+                opts->channel_desc  = st_grab (new (std::nothrow) String);
+            }
 
-            opts->channel_name  = st_grab (new (std::nothrow) String (stream_name));
-            opts->channel_title = st_grab (new (std::nothrow) String (stream_name));
-            opts->channel_desc  = st_grab (new (std::nothrow) String);
+            Ref<PlaybackItem> const item = grab (new (std::nothrow) PlaybackItem);
+            opts->default_item = item;
+            {
+                *item = *default_channel_opts->default_item;
+                item->stream_spec = st_grab (new (std::nothrow) String (chain_spec));
+                item->spec_kind = PlaybackItem::SpecKind::Chain;
+            }
 
-            opts->stream_spec = st_grab (new (std::nothrow) String (chain_spec));
-            opts->is_chain = true;
-
-	    createStreamChannel (opts);
+	    createStreamChannel (opts, item);
 	} else
 	if (section_entry->getType() == MConfig::SectionEntry::Type_Section) {
 	    MConfig::Section * const section = static_cast <MConfig::Section*> (section_entry);
@@ -1409,19 +1328,25 @@ MomentGstModule::parseChainsConfigSection ()
 	    }
 
             Ref<ChannelOptions> const opts = grab (new (std::nothrow) ChannelOptions);
-            *opts = *default_channel_opts;
+            {
+                *opts = *default_channel_opts;
+                opts->channel_name  = st_grab (new (std::nothrow) String (stream_name));
+                opts->channel_title = st_grab (new (std::nothrow) String (stream_name));
+                opts->channel_desc  = st_grab (new (std::nothrow) String);
 
-            opts->channel_name  = st_grab (new (std::nothrow) String (stream_name));
-            opts->channel_title = st_grab (new (std::nothrow) String (stream_name));
-            opts->channel_desc  = st_grab (new (std::nothrow) String);
+                opts->recording = got_record_path;
+                opts->record_path = st_grab (new (std::nothrow) String (record_path));
+            }
 
-            opts->stream_spec = st_grab (new (std::nothrow) String (chain_spec));
-            opts->is_chain = true;
+            Ref<PlaybackItem> const item = grab (new (std::nothrow) PlaybackItem);
+            opts->default_item = item;
+            {
+                *item = *default_channel_opts->default_item;
+                item->stream_spec = st_grab (new (std::nothrow) String (chain_spec));
+                item->spec_kind = PlaybackItem::SpecKind::Chain;
+            }
 
-            opts->recording = got_record_path;
-            opts->record_path = st_grab (new (std::nothrow) String (record_path));
-
-	    createStreamChannel (opts);
+	    createStreamChannel (opts, item);
 	}
     }
 }
@@ -1633,7 +1558,7 @@ MomentGstModule::parseStreamsConfigSection ()
                 }
             }
 
-            bool no_audio = default_channel_opts->no_audio;
+            bool no_audio = default_channel_opts->default_item->no_audio;
             {
                 ConstMemory const opt_name = "no_audio";
                 if (!configSectionGetBoolean (item_section, opt_name, &no_audio, no_audio))
@@ -1641,7 +1566,7 @@ MomentGstModule::parseStreamsConfigSection ()
                 logI_ (_func, "stream ", stream_name->mem(), ": ", opt_name, ": ", no_audio);
             }
 
-            bool no_video = default_channel_opts->no_video;
+            bool no_video = default_channel_opts->default_item->no_video;
             {
                 ConstMemory const opt_name = "no_video";
                 if (!configSectionGetBoolean (item_section, opt_name, &no_video, no_video))
@@ -1649,7 +1574,7 @@ MomentGstModule::parseStreamsConfigSection ()
                 logI_ (_func, "stream ", stream_name->mem(), ": ", opt_name, ": ", no_video);
             }
 
-            bool force_transcode = default_channel_opts->force_transcode;
+            bool force_transcode = default_channel_opts->default_item->force_transcode;
             {
                 ConstMemory const opt_name = "force_transcode";
                 if (!configSectionGetBoolean (item_section, opt_name, &force_transcode, force_transcode))
@@ -1657,7 +1582,7 @@ MomentGstModule::parseStreamsConfigSection ()
                 logI_ (_func, "stream ", stream_name->mem(), ": ", opt_name, ": ", force_transcode);
             }
 
-            bool force_transcode_audio = default_channel_opts->force_transcode_audio;
+            bool force_transcode_audio = default_channel_opts->default_item->force_transcode_audio;
             {
                 ConstMemory const opt_name = "force_transcode_audio";
                 if (!configSectionGetBoolean (item_section, opt_name, &force_transcode_audio, force_transcode_audio))
@@ -1665,7 +1590,7 @@ MomentGstModule::parseStreamsConfigSection ()
                 logI_ (_func, "stream ", stream_name->mem(), ": ", opt_name, ": ", force_transcode_audio);
             }
 
-            bool force_transcode_video = default_channel_opts->force_transcode_video;
+            bool force_transcode_video = default_channel_opts->default_item->force_transcode_video;
             {
                 ConstMemory const opt_name = "force_transcode_video";
                 if (!configSectionGetBoolean (item_section, opt_name, &force_transcode_video, force_transcode_video))
@@ -1674,47 +1599,51 @@ MomentGstModule::parseStreamsConfigSection ()
             }
 
             Ref<ChannelOptions> const opts = grab (new (std::nothrow) ChannelOptions);
-            *opts = *default_channel_opts;
+            {
+                *opts = *default_channel_opts;
+                opts->channel_name  = st_grab (new (std::nothrow) String (stream_name->mem()));
+                opts->channel_title = st_grab (new (std::nothrow) String (channel_title->mem()));
+                opts->channel_desc  = st_grab (new (std::nothrow) String (channel_desc->mem()));
 
-            opts->channel_name  = st_grab (new (std::nothrow) String (stream_name->mem()));
-            opts->channel_title = st_grab (new (std::nothrow) String (channel_title->mem()));
-            opts->channel_desc  = st_grab (new (std::nothrow) String (channel_desc->mem()));
+                opts->recording = (record_path ? true : false);
+                opts->record_path = st_grab (new (std::nothrow) String (record_path ? record_path->mem() : ConstMemory()));
 
-            opts->force_transcode = force_transcode;
-            opts->force_transcode_audio = force_transcode_audio;
-            opts->force_transcode_video = force_transcode_video;
+                opts->connect_on_demand = connect_on_demand;
+                opts->connect_on_demand_timeout = connect_on_demand_timeout;
+            }
 
-            opts->no_audio = no_audio;
-            opts->no_video = no_video;
+            Ref<PlaybackItem> const item = grab (new (std::nothrow) PlaybackItem);
+            opts->default_item = item;
+            {
+                *item = *default_channel_opts->default_item;
 
-            opts->recording = (record_path ? true : false);
-            opts->record_path = st_grab (new (std::nothrow) String (record_path ? record_path->mem() : ConstMemory()));
-
-            opts->connect_on_demand = connect_on_demand;
-            opts->connect_on_demand_timeout = connect_on_demand_timeout;
+                item->no_audio = no_audio;
+                item->no_video = no_video;
+                item->force_transcode = force_transcode;
+                item->force_transcode_audio = force_transcode_audio;
+                item->force_transcode_video = force_transcode_video;
+            }
 
 	    if (chain && !chain->isNull()) {
                 logD_ (_func, "chain, channel \"", opts->channel_name, "\"");
 
-                opts->stream_spec = st_grab (new (std::nothrow) String (chain->mem()));
-                opts->is_chain = true;
+                item->stream_spec = st_grab (new (std::nothrow) String (chain->mem()));
+                item->spec_kind = PlaybackItem::SpecKind::Chain;
 
-		createStreamChannel (opts, push_agent);
+		createStreamChannel (opts, item, push_agent);
 	    } else
 	    if (uri && !uri->isNull()) {
                 logD_ (_func, "uri, channel \"", opts->channel_name, "\"");
 
-                opts->stream_spec = st_grab (new (std::nothrow) String (uri->mem()));
-                opts->is_chain = false;
+                item->stream_spec = st_grab (new (std::nothrow) String (uri->mem()));
+                item->spec_kind = PlaybackItem::SpecKind::Uri;
 
-		createStreamChannel (opts, push_agent);
+		createStreamChannel (opts, item, push_agent);
 	    } else
 	    if (playlist && !playlist->isNull()) {
                 logD_ (_func, "playlist, channel \"", opts->channel_name, "\"");
 
-		createPlaylistChannel (playlist->mem(),
-                                       opts,
-                                       push_agent);
+		createPlaylistChannel (playlist->mem(), opts, push_agent);
 	    } else {
 		logW_ (_func, "None of chain/uri/playlist specified for stream \"", stream_name, "\"");
 		createDummyChannel (stream_name->mem(),
@@ -1847,11 +1776,7 @@ MomentGstModule::createMediaSource (CbDesc<MediaSource::Frontend> const &fronten
                                     VideoStream    * const mix_video_stream,
                                     Time             const initial_seek,
                                     ChannelOptions * const channel_opts,
-                                    ConstMemory      const stream_spec,
-                                    bool             const is_chain,
-                                    bool             const force_transcode,
-                                    bool             const force_transcode_audio,
-                                    bool             const force_transcode_video)
+                                    PlaybackItem   * const playback_item)
 {
     Ref<GstStream> const gst_stream = grab (new (std::nothrow) GstStream);
     gst_stream->init (frontend,
@@ -1861,11 +1786,7 @@ MomentGstModule::createMediaSource (CbDesc<MediaSource::Frontend> const &fronten
                       mix_video_stream,
                       initial_seek,
                       channel_opts,
-                      stream_spec,
-                      is_chain,
-                      force_transcode,
-                      force_transcode_audio,
-                      force_transcode_video);
+                      playback_item);
     return gst_stream;
 }
 
@@ -1913,12 +1834,12 @@ MomentGstModule::init (MomentServer * const moment)
 	}
 
 	if (val == MConfig::Boolean_False) {
-	    default_channel_opts->enable_prechunking = false;
+	    default_channel_opts->default_item->enable_prechunking = false;
 	} else {
-	    default_channel_opts->enable_prechunking = true;
+	    default_channel_opts->default_item->enable_prechunking = true;
 	}
 
-        logD_ (_func, opt_name, ": ", default_channel_opts->enable_prechunking);
+        logD_ (_func, opt_name, ": ", default_channel_opts->default_item->enable_prechunking);
     }
 
     {
@@ -1954,7 +1875,9 @@ MomentGstModule::init (MomentServer * const moment)
     {
 	ConstMemory const opt_name = "mod_gst/width";
 	MConfig::GetResult const res = config->getUint64_default (
-		opt_name, &default_channel_opts->default_width, default_channel_opts->default_width);
+		opt_name,
+                &default_channel_opts->default_item->default_width,
+                default_channel_opts->default_item->default_width);
 	if (!res) {
 	    logE_ (_func, "bad value for ", opt_name);
 	    return Result::Failure;
@@ -1964,7 +1887,9 @@ MomentGstModule::init (MomentServer * const moment)
     {
 	ConstMemory const opt_name = "mod_gst/height";
 	MConfig::GetResult const res = config->getUint64_default (
-		opt_name, &default_channel_opts->default_height, default_channel_opts->default_height);
+		opt_name,
+                &default_channel_opts->default_item->default_height,
+                default_channel_opts->default_item->default_height);
 	if (!res) {
 	    logE_ (_func, "bad value for ", opt_name);
 	    return Result::Failure;
@@ -1974,7 +1899,9 @@ MomentGstModule::init (MomentServer * const moment)
     {
 	ConstMemory const opt_name = "mod_gst/bitrate";
 	MConfig::GetResult const res = config->getUint64_default (
-		opt_name, &default_channel_opts->default_bitrate, default_channel_opts->default_bitrate);
+		opt_name,
+                &default_channel_opts->default_item->default_bitrate,
+                default_channel_opts->default_item->default_bitrate);
 	if (!res) {
 	    logE_ (_func, "bad value for ", opt_name);
 	    return Result::Failure;
@@ -2159,6 +2086,7 @@ MomentGstModule::MomentGstModule()
       serve_playlist_json (false)
 {
     default_channel_opts = grab (new (std::nothrow) ChannelOptions);
+    default_channel_opts->default_item = grab (new (std::nothrow) PlaybackItem);
 }
 
 MomentGstModule::~MomentGstModule ()

@@ -84,11 +84,11 @@ GstStream::workqueueThreadFunc (void * const _self)
 void
 GstStream::createPipelineForChainSpec ()
 {
-    logD (chains, _func, stream_spec);
+    logD (chains, _func, playback_item->stream_spec);
 
-    assert (is_chain);
+    assert (playback_item->spec_kind == PlaybackItem::SpecKind::Chain);
 
-    if (!stream_spec->mem().len())
+    if (!playback_item->stream_spec->mem().len())
 	return;
 
     GstElement *chain_el = NULL;
@@ -100,7 +100,7 @@ GstStream::createPipelineForChainSpec ()
 
   {
     GError *error = NULL;
-    chain_el = gst_parse_launch (stream_spec->cstr(), &error);
+    chain_el = gst_parse_launch (playback_item->stream_spec->cstr(), &error);
     if (!chain_el) {
 	if (error) {
 	    logE_ (_func, "gst_parse_launch() failed: ", error->code,
@@ -126,7 +126,7 @@ GstStream::createPipelineForChainSpec ()
 	    GstPad * const pad = gst_element_get_static_pad (in_stats_el, "sink");
 	    if (!pad) {
 		logE_ (_func, "element called \"in_stats\" doesn't have a \"sink\" "
-		       "pad. Chain spec: ", stream_spec);
+		       "pad. Chain spec: ", playback_item->stream_spec);
 		goto _failure;
 	    }
 
@@ -147,7 +147,7 @@ GstStream::createPipelineForChainSpec ()
 	    GstPad * const pad = gst_element_get_static_pad (audio_el, "sink");
 	    if (!pad) {
 		logE_ (_func, "element called \"audio\" doesn't have a \"sink\" "
-		       "pad. Chain spec: ", stream_spec);
+		       "pad. Chain spec: ", playback_item->stream_spec);
 		goto _failure;
 	    }
 
@@ -178,7 +178,7 @@ GstStream::createPipelineForChainSpec ()
 	} else {
 	    logW_ (_func, "chain \"", channel_opts->channel_name, "\" does not contain "
 		   "an element named \"audio\". There'll be no audio "
-		   "for the stream. Chain spec: ", stream_spec);
+		   "for the stream. Chain spec: ", playback_item->stream_spec);
 	}
     }
 
@@ -188,7 +188,7 @@ GstStream::createPipelineForChainSpec ()
 	    GstPad * const pad = gst_element_get_static_pad (video_el, "sink");
 	    if (!pad) {
 		logE_ (_func, "element called \"video\" doesn't have a \"sink\" "
-		       "pad. Chain spec: ", stream_spec);
+		       "pad. Chain spec: ", playback_item->stream_spec);
 		goto _failure;
 	    }
 
@@ -205,7 +205,7 @@ GstStream::createPipelineForChainSpec ()
 	} else {
 	    logW_ (_func, "chain \"", channel_opts->channel_name, "\" does not contain "
 		   "an element named \"video\". There'll be no video "
-		   "for the stream. Chain spec: ", stream_spec);
+		   "for the stream. Chain spec: ", playback_item->stream_spec);
 	}
     }
 
@@ -254,9 +254,9 @@ GstStream::createPipelineForUri ()
 {
     logD (pipeline, _this_func_);
 
-    assert (!is_chain);
+    assert (playback_item->spec_kind == PlaybackItem::SpecKind::Uri);
 
-    if (!stream_spec->mem().len())
+    if (!playback_item->stream_spec->mem().len())
 	return;
 
     GstElement *playbin           = NULL,
@@ -396,25 +396,25 @@ GstStream::createPipelineForUri ()
 	    goto _failure;
 	}
 
-	if (channel_opts->default_width && channel_opts->default_height) {
+	if (playback_item->default_width && playback_item->default_height) {
 	    g_object_set (G_OBJECT (video_capsfilter), "caps",
 			  gst_caps_new_simple ("video/x-raw-yuv",
-					       "width",  G_TYPE_INT, (int) channel_opts->default_width,
-					       "height", G_TYPE_INT, (int) channel_opts->default_height,
+					       "width",  G_TYPE_INT, (int) playback_item->default_width,
+					       "height", G_TYPE_INT, (int) playback_item->default_height,
 					       "pixel-aspect-ratio", GST_TYPE_FRACTION, 1, 1,
 					       NULL), NULL);
 	} else
-	if (channel_opts->default_width) {
+	if (playback_item->default_width) {
 	    g_object_set (G_OBJECT (video_capsfilter), "caps",
 			  gst_caps_new_simple ("video/x-raw-yuv",
-					       "width",  G_TYPE_INT, (int) channel_opts->default_width,
+					       "width",  G_TYPE_INT, (int) playback_item->default_width,
 					       "pixel-aspect-ratio", GST_TYPE_FRACTION, 1, 1,
 					       NULL), NULL);
 	} else
-	if (channel_opts->default_height) {
+	if (playback_item->default_height) {
 	    g_object_set (G_OBJECT (video_capsfilter), "caps",
 			  gst_caps_new_simple ("video/x-raw-yuv",
-					       "height", G_TYPE_INT, (int) channel_opts->default_height,
+					       "height", G_TYPE_INT, (int) playback_item->default_height,
 					       "pixel-aspect-ratio", GST_TYPE_FRACTION, 1, 1,
 					       NULL), NULL);
 	}
@@ -426,7 +426,7 @@ GstStream::createPipelineForUri ()
 	}
 	// TODO Config parameter for bitrate.
 //	g_object_set (G_OBJECT (video_encoder), "bitrate", 100000, NULL);
-	g_object_set (G_OBJECT (video_encoder), "bitrate", (gulong) channel_opts->default_bitrate, NULL);
+	g_object_set (G_OBJECT (video_encoder), "bitrate", (gulong) playback_item->default_bitrate, NULL);
 
 #if 0
 	{
@@ -473,7 +473,7 @@ GstStream::createPipelineForUri ()
     g_object_set (G_OBJECT (playbin), "video-sink", video_encoder_bin, NULL);
     video_encoder_bin = NULL;
 
-    g_object_set (G_OBJECT (playbin), "uri", stream_spec->cstr(), NULL);
+    g_object_set (G_OBJECT (playbin), "uri", playback_item->stream_spec->cstr(), NULL);
 
     // TODO got_video, got_audio -?
 
@@ -516,9 +516,9 @@ GstStream::createSmartPipelineForUri ()
 {
     logD_ (_this_func_);
 
-    assert (!is_chain);
+    assert (playback_item->spec_kind == PlaybackItem::SpecKind::Uri);
 
-    if (stream_spec->mem().len() == 0) {
+    if (playback_item->stream_spec->mem().len() == 0) {
         logE_ (_this_func, "URI not specified for channel \"", channel_opts->channel_name, "\"");
         return;
     }
@@ -536,7 +536,7 @@ GstStream::createSmartPipelineForUri ()
         goto _failure;
     }
 
-    logD_ (_func, "uri: ", stream_spec);
+    logD_ (_func, "uri: ", playback_item->stream_spec);
 
   {
     pipeline = gst_pipeline_new ("pipeline");
@@ -556,7 +556,7 @@ GstStream::createSmartPipelineForUri ()
     gst_object_ref (this->playbin);
 
     gst_bin_add_many (GST_BIN (pipeline), decodebin, NULL);
-    g_object_set (G_OBJECT (decodebin), "uri", stream_spec->cstr(), NULL);
+    g_object_set (G_OBJECT (decodebin), "uri", playback_item->stream_spec->cstr(), NULL);
     decodebin = NULL;
 
     if (!mt_unlocks (mutex) setPipelinePlaying ()) {
@@ -695,14 +695,14 @@ GstStream::decodebinAutoplugContinue (GstElement * const /* bin */,
         g_free (str);
     }
 
-    if (!self->force_transcode && !self->force_transcode_audio) {
+    if (!self->playback_item->force_transcode && !self->playback_item->force_transcode_audio) {
         if (isMpegAudioCaps (caps)) {
             logD_ (_func, "autoplugged mpeg audio");
             return FALSE;
         }
     }
 
-    if (!self->force_transcode && !self->force_transcode_video) {
+    if (!self->playback_item->force_transcode && !self->playback_item->force_transcode_video) {
         if (isH264VideoCaps (caps)) {
             logD_ (_func, "autoplugged h.264 video");
             return FALSE;
@@ -727,7 +727,7 @@ GstStream::decodebinPadAdded (GstElement * const /* element */,
         return;
     }
 
-    if (self->channel_opts->no_audio
+    if (self->playback_item->no_audio
         && isAnyAudioCaps (caps))
     {
         self->setAudioPad (new_pad);
@@ -735,7 +735,7 @@ GstStream::decodebinPadAdded (GstElement * const /* element */,
         return;
     }
 
-    if (self->channel_opts->no_video
+    if (self->playback_item->no_video
         && isAnyVideoCaps (caps))
     {
         self->setVideoPad (new_pad);
@@ -927,7 +927,7 @@ GstStream::doSetAudioPad (GstPad      * const pad,
 
     mt_unlocks (mutex) doSetPad (pad,
                                  "audio",
-                                 channel_opts->no_audio ? NULL : GstStream::audioDataCb,
+                                 playback_item->no_audio ? NULL : GstStream::audioDataCb,
                                  chain);
 }
 
@@ -955,7 +955,7 @@ GstStream::doSetVideoPad (GstPad      * const pad,
 
     mt_unlocks (mutex) doSetPad (pad,
                                  "video",
-                                 channel_opts->no_video ? NULL : GstStream::videoDataCb,
+                                 playback_item->no_video ? NULL : GstStream::videoDataCb,
                                  chain);
 }
 
@@ -1161,7 +1161,7 @@ GstStream::reportMetaData ()
     }
     metadata_reported = true;
 
-    if (!channel_opts->send_metadata)
+    if (!playback_item->send_metadata)
 	return;
 
     VideoStream::VideoMessage msg;
@@ -1460,7 +1460,7 @@ GstStream::doAudioData (GstBuffer * const buffer)
     if (first_audio_frame) {
 	first_audio_frame = false;
 
-	if (channel_opts->send_metadata) {
+	if (playback_item->send_metadata) {
 	    if (!got_video || !first_video_frame) {
 	      // There's no video or we've got the first video frame already.
 		reportMetaData ();
@@ -1526,7 +1526,7 @@ GstStream::doAudioData (GstBuffer * const buffer)
 
             PagePool::PageListHead page_list;
 
-            if (channel_opts->enable_prechunking) {
+            if (playback_item->enable_prechunking) {
                 Size msg_audio_hdr_len = 1;
                 if (codec_data_type == VideoStream::AudioFrameType::AacSequenceHeader)
                     msg_audio_hdr_len = 2;
@@ -1549,7 +1549,7 @@ GstStream::doAudioData (GstBuffer * const buffer)
 
 	    VideoStream::AudioMessage msg;
 	    msg.timestamp_nanosec = cd_timestamp_nanosec;
-	    msg.prechunk_size = (channel_opts->enable_prechunking ? RtmpConnection::PrechunkSize : 0);
+	    msg.prechunk_size = (playback_item->enable_prechunking ? RtmpConnection::PrechunkSize : 0);
 	    msg.frame_type = codec_data_type;
 	    msg.codec_id = tmp_audio_codec_id;
             msg.rate = tmp_audio_rate;
@@ -1578,7 +1578,7 @@ GstStream::doAudioData (GstBuffer * const buffer)
 
     PagePool::PageListHead page_list;
 
-    if (channel_opts->enable_prechunking) {
+    if (playback_item->enable_prechunking) {
         Size gen_audio_hdr_len = 1;
         if (tmp_audio_codec_id == VideoStream::AudioCodecId::AAC)
             gen_audio_hdr_len = 2;
@@ -1600,7 +1600,7 @@ GstStream::doAudioData (GstBuffer * const buffer)
 
     VideoStream::AudioMessage msg;
     msg.timestamp_nanosec = timestamp_nanosec;
-    msg.prechunk_size = (channel_opts->enable_prechunking ? RtmpConnection::PrechunkSize : 0);
+    msg.prechunk_size = (playback_item->enable_prechunking ? RtmpConnection::PrechunkSize : 0);
     msg.frame_type = VideoStream::AudioFrameType::RawData;
     msg.codec_id = tmp_audio_codec_id;
 
@@ -1748,7 +1748,7 @@ GstStream::doVideoData (GstBuffer * const buffer)
 
         gst_caps_unref (caps);
 
-	if (channel_opts->send_metadata) {
+	if (playback_item->send_metadata) {
 	    if (!got_audio || !first_audio_frame) {
 	      // There's no video or we've got the first video frame already.
 		reportMetaData ();
@@ -1817,7 +1817,7 @@ GstStream::doVideoData (GstBuffer * const buffer)
 
         PagePool::PageListHead page_list;
 
-        if (channel_opts->enable_prechunking) {
+        if (playback_item->enable_prechunking) {
             RtmpConnection::PrechunkContext prechunk_ctx (5 /* initial_offset: FLV AVC header length */);
             RtmpConnection::fillPrechunkedPages (&prechunk_ctx,
                                                  ConstMemory (GST_BUFFER_DATA (avc_codec_data_buffer),
@@ -1836,7 +1836,7 @@ GstStream::doVideoData (GstBuffer * const buffer)
 
 	VideoStream::VideoMessage msg;
 	msg.timestamp_nanosec = timestamp_nanosec;
-	msg.prechunk_size = (channel_opts->enable_prechunking ? RtmpConnection::PrechunkSize : 0);
+	msg.prechunk_size = (playback_item->enable_prechunking ? RtmpConnection::PrechunkSize : 0);
 	msg.frame_type = VideoStream::VideoFrameType::AvcSequenceHeader;
 	msg.codec_id = tmp_video_codec_id;
 
@@ -1914,7 +1914,7 @@ GstStream::doVideoData (GstBuffer * const buffer)
 
     PagePool::PageListHead page_list;
 
-    if (channel_opts->enable_prechunking) {
+    if (playback_item->enable_prechunking) {
         Size gen_video_hdr_len = 1;
         if (tmp_video_codec_id == VideoStream::VideoCodecId::AVC)
             gen_video_hdr_len = 5;
@@ -1935,7 +1935,7 @@ GstStream::doVideoData (GstBuffer * const buffer)
 //    hexdump (errs, ConstMemory (GST_BUFFER_DATA (buffer), GST_BUFFER_SIZE (buffer)));
 
     msg.timestamp_nanosec = timestamp_nanosec;
-    msg.prechunk_size = (channel_opts->enable_prechunking ? RtmpConnection::PrechunkSize : 0);
+    msg.prechunk_size = (playback_item->enable_prechunking ? RtmpConnection::PrechunkSize : 0);
 
     msg.page_pool = page_pool;
     msg.page_list = page_list;
@@ -2212,11 +2212,12 @@ GstStream::doCreatePipeline ()
 {
     logD (pipeline, _this_func_);
 
-    if (is_chain)
+    if (playback_item->spec_kind == PlaybackItem::SpecKind::Chain) {
 	createPipelineForChainSpec ();
-    else
+    } else {
 //	createPipelineForUri ();
 	createSmartPipelineForUri ();
+    }
 }
 
 void
@@ -2420,11 +2421,7 @@ GstStream::init (CbDesc<MediaSource::Frontend> const &frontend,
 		 VideoStream    * const mix_video_stream,
 		 Time             const initial_seek,
                  ChannelOptions * const channel_opts,
-                 ConstMemory      const stream_spec,
-                 bool             const is_chain,
-                 bool             const force_transcode,
-                 bool             const force_transcode_audio,
-                 bool             const force_transcode_video)
+                 PlaybackItem   * const playback_item)
 {
     logD (pipeline, _this_func_);
 
@@ -2435,13 +2432,8 @@ GstStream::init (CbDesc<MediaSource::Frontend> const &frontend,
     this->video_stream = video_stream;
     this->mix_video_stream = mix_video_stream;
 
-    this->channel_opts = channel_opts;
-
-    this->stream_spec     = st_grab (new (std::nothrow) String (stream_spec));
-    this->is_chain        = is_chain;
-    this->force_transcode = force_transcode;
-    this->force_transcode_audio = force_transcode_audio;
-    this->force_transcode_video = force_transcode_video;
+    this->channel_opts  = channel_opts;
+    this->playback_item = playback_item;
 
     this->initial_seek = initial_seek;
     if (initial_seek == 0)
@@ -2482,12 +2474,7 @@ GstStream::init (CbDesc<MediaSource::Frontend> const &frontend,
 }
 
 GstStream::GstStream ()
-    : is_chain        (false),
-      force_transcode (false),
-      force_transcode_audio (false),
-      force_transcode_video (false),
-       
-      timers    (this /* coderef_container */),
+    : timers    (this /* coderef_container */),
       page_pool (this /* coderef_container */),
 
       video_stream (NULL),

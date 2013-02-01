@@ -40,6 +40,7 @@ private:
     {
     public:
 	mt_const Ref<Channel> channel;
+        mt_const Ref<ChannelOptions> channel_opts;
 
 	mt_const Ref<String> channel_name;
         mt_const Ref<String> channel_title;
@@ -136,6 +137,7 @@ private:
                                 PushAgent      *push_agent = NULL);
 
     void createStreamChannel (ChannelOptions *channel_opts,
+                              PlaybackItem   *playback_item,
                               PushAgent      *push_agent = NULL);
 
     void createDummyChannel (ConstMemory  channel_name,
@@ -166,11 +168,7 @@ public:
                                         VideoStream    *mix_video_stream,
                                         Time            initial_seek,
                                         ChannelOptions *channel_opts,
-                                        ConstMemory     stream_spec,
-                                        bool            is_chain,
-                                        bool            force_transcode,
-                                        bool            force_transcode_audio,
-                                        bool            force_transcode_video);
+                                        PlaybackItem   *playback_item);
   mt_iface_end
 
     Result init (MomentServer *moment);
