@@ -28,8 +28,8 @@
 
 // TODO These header macros are the same as in rtmpt_server.cpp
 #define MOMENT_GST__HEADERS_DATE \
-	Byte date_buf [timeToString_BufSize]; \
-	Size const date_len = timeToString (Memory::forObject (date_buf), getUnixtime());
+	Byte date_buf [unixtimeToString_BufSize]; \
+	Size const date_len = unixtimeToString (Memory::forObject (date_buf), getUnixtime());
 
 #define MOMENT_GST__COMMON_HEADERS \
 	"Server: Moment/1.0\r\n" \
@@ -1598,6 +1598,14 @@ MomentGstModule::parseStreamsConfigSection ()
                 logI_ (_func, "stream ", stream_name->mem(), ": ", opt_name, ": ", force_transcode_video);
             }
 
+            bool sync_to_clock = default_channel_opts->default_item->sync_to_clock;
+            {
+                ConstMemory const opt_name = "sync_to_clock";
+                if (!configSectionGetBoolean (item_section, opt_name, &sync_to_clock, sync_to_clock))
+                    return Result::Failure;
+                logI_ (_func, "stream ", stream_name->mem(), ": ", opt_name, ": ", sync_to_clock);
+            }
+
             Ref<ChannelOptions> const opts = grab (new (std::nothrow) ChannelOptions);
             {
                 *opts = *default_channel_opts;
@@ -1622,6 +1630,7 @@ MomentGstModule::parseStreamsConfigSection ()
                 item->force_transcode = force_transcode;
                 item->force_transcode_audio = force_transcode_audio;
                 item->force_transcode_video = force_transcode_video;
+                item->sync_to_clock = sync_to_clock;
             }
 
 	    if (chain && !chain->isNull()) {
