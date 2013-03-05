@@ -107,10 +107,17 @@ private:
       bool got_audio;
 
       bool first_audio_frame;
+      bool first_video_frame;
+
       Count audio_skip_counter;
       Count video_skip_counter;
 
-      bool first_video_frame;
+      bool is_adts_aac_stream;
+      bool got_adts_aac_codec_data;
+      Byte adts_aac_codec_data [2];
+
+      bool is_h264_stream;
+      GstBuffer *avc_codec_data_buffer;
 
       Uint64 prv_audio_timestamp;
 

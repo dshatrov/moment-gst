@@ -26,9 +26,9 @@ using namespace Moment;
 namespace MomentGst {
 
 static LogGroup libMary_logGroup_chains   ("mod_gst.chains",   LogLevel::I);
-static LogGroup libMary_logGroup_pipeline ("mod_gst.pipeline", LogLevel::D);
-static LogGroup libMary_logGroup_stream   ("mod_gst.stream",   LogLevel::D);
-static LogGroup libMary_logGroup_bus      ("mod_gst.bus",      LogLevel::D);
+static LogGroup libMary_logGroup_pipeline ("mod_gst.pipeline", LogLevel::I);
+static LogGroup libMary_logGroup_stream   ("mod_gst.stream",   LogLevel::I);
+static LogGroup libMary_logGroup_bus      ("mod_gst.bus",      LogLevel::I);
 static LogGroup libMary_logGroup_frames   ("mod_gst.frames",   LogLevel::E); // E is the default
 static LogGroup libMary_logGroup_novideo  ("mod_gst.novideo",  LogLevel::I);
 
@@ -152,20 +152,6 @@ GstStream::createPipelineForChainSpec ()
 	    }
 
 	    got_audio = true;
-
-#if 0
-// At this moment, the caps are not negotiated yet.
-	    {
-	      // TEST
-		GstCaps * const caps = gst_pad_get_negotiated_caps (pad);
-		{
-		    gchar * const str = gst_caps_to_string (caps);
-		    logD_ (_func, "audio caps: ", str);
-		    g_free (str);
-		}
-		gst_caps_unref (caps);
-	    }
-#endif
 
 	    // TODO Use "handoff" signal
 	    audio_probe_id = gst_pad_add_buffer_probe (
@@ -557,6 +543,10 @@ GstStream::createSmartPipelineForUri ()
 
     gst_bin_add_many (GST_BIN (pipeline), decodebin, NULL);
     g_object_set (G_OBJECT (decodebin), "uri", playback_item->stream_spec->cstr(), NULL);
+    g_object_set (G_OBJECT (decodebin), "use-buffering", FALSE, NULL);
+//    g_object_set (G_OBJECT (decodebin), "download", FALSE, NULL);
+//    g_object_set (G_OBJECT (decodebin), "buffer-size", (Int64) 0, NULL);
+//    g_object_set (G_OBJECT (decodebin), "buffer-duration", (Int64) 0, NULL);
     decodebin = NULL;
 
     if (!mt_unlocks (mutex) setPipelinePlaying ()) {
@@ -575,35 +565,6 @@ _return:
         gst_object_unref (GST_OBJECT (pipeline));
     if (decodebin)
         gst_object_unref (GST_OBJECT (decodebin));
-}
-
-static bool areCapsCompatible (GstCaps * const caps,
-                               GstCaps * const ref_caps)
-{
-    bool result = false;
-
-    {
-        gchar * const str = gst_caps_to_string (caps);
-        logD_ (_func, "caps: ", str);
-        g_free (str);
-    }
-
-    GstCaps * const common_caps = gst_caps_intersect (caps, ref_caps);
-
-    if (common_caps && !gst_caps_is_empty (common_caps)) {
-        gchar * const common_str = gst_caps_to_string (common_caps);
-        logD_ (_func, "common_caps: ", common_str);
-        g_free (common_str);
-
-        result = true;
-    } else {
-        logD_ (_func, "No caps match");
-    }
-
-    if (common_caps)
-        gst_caps_unref (common_caps);
-
-    return result;
 }
 
 static bool isAnyCaps (GstCaps     * const caps,
@@ -635,48 +596,64 @@ static bool isAnyVideoCaps (GstCaps * const caps)
 
 static bool isRawAudioCaps (GstCaps * const caps)
 {
-    GstCaps * const raw_caps =
-            gst_caps_new_full (
-                    gst_structure_new ("audio/x-raw-int", NULL),
-                    gst_structure_new ("audio/x-raw-float", NULL),
-                    NULL);
-    bool const res = areCapsCompatible (caps, raw_caps);
-    gst_caps_unref (raw_caps);
-    return res;
+    for (guint i = 0, i_end = gst_caps_get_size (caps); i < i_end; ++i) {
+        GstStructure * const ref_structure = gst_caps_get_structure (caps, i);
+        gchar const * const name = gst_structure_get_name (ref_structure);
+        ConstMemory const name_mem = ConstMemory (name, strlen (name));
+        if (equal (name_mem, "audio/x-raw-int") ||
+            equal (name_mem, "audio/x-raw-float"))
+        {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 static bool isRawVideoCaps (GstCaps * const caps)
 {
-    GstCaps * const raw_caps =
-            gst_caps_new_full (
-                    gst_structure_new ("video/x-raw-yuv", NULL),
-                    gst_structure_new ("video/x-raw-rgb", NULL),
-                    NULL);
-    bool const res = areCapsCompatible (caps, raw_caps);
-    gst_caps_unref (raw_caps);
-    return res;
+    for (guint i = 0, i_end = gst_caps_get_size (caps); i < i_end; ++i) {
+        GstStructure * const ref_structure = gst_caps_get_structure (caps, i);
+        gchar const * const name = gst_structure_get_name (ref_structure);
+        ConstMemory const name_mem = ConstMemory (name, strlen (name));
+        if (equal (name_mem, "video/x-raw-yuv") ||
+            equal (name_mem, "video/x-raw-rgb"))
+        {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 static bool isMpegAudioCaps (GstCaps * const caps)
 {
-    GstCaps * const raw_caps =
-            gst_caps_new_full (
-                    gst_structure_new ("audio/mpeg", NULL),
-                    NULL);
-    bool const res = areCapsCompatible (caps, raw_caps);
-    gst_caps_unref (raw_caps);
-    return res;
+    for (guint i = 0, i_end = gst_caps_get_size (caps); i < i_end; ++i) {
+        GstStructure * const ref_structure = gst_caps_get_structure (caps, i);
+        gchar const * const name = gst_structure_get_name (ref_structure);
+        if (equal (ConstMemory (name, strlen (name)), "audio/mpeg")) {
+            gboolean val = false;
+            if (gst_structure_get_boolean (ref_structure, "framed", &val) && val)
+                return true;
+        }
+    }
+
+    return false;
 }
 
 static bool isH264VideoCaps (GstCaps * const caps)
 {
-    GstCaps * const raw_caps =
-            gst_caps_new_full (
-                    gst_structure_new ("video/x-h264", NULL),
-                    NULL);
-    bool const res = areCapsCompatible (caps, raw_caps);
-    gst_caps_unref (raw_caps);
-    return res;
+    for (guint i = 0, i_end = gst_caps_get_size (caps); i < i_end; ++i) {
+        GstStructure * const ref_structure = gst_caps_get_structure (caps, i);
+        gchar const * const name = gst_structure_get_name (ref_structure);
+        if (equal (ConstMemory (name, strlen (name)), "video/x-h264")) {
+            gboolean val = false;
+            if (gst_structure_get_boolean (ref_structure, "parsed", &val) && val)
+                return true;
+        }
+    }
+
+    return false;
 }
 
 gboolean
@@ -725,6 +702,12 @@ GstStream::decodebinPadAdded (GstElement * const /* element */,
     if (!caps) {
         logD_ (_func, "NULL caps");
         return;
+    }
+
+    {
+        gchar * const str = gst_caps_to_string (caps);
+        logD_ (_func, "caps: ", str);
+        g_free (str);
     }
 
     if (self->playback_item->no_audio
@@ -784,7 +767,6 @@ GstStream::doSetPad (GstPad            * const pad,
 
     {
         GError *err = NULL;
-        // TODO 'sync=true' should be optional (sometimes undesirable)
         // TODO configurable encoder
         String const chain_str (chain);
         logD_ (_func, "calling gst_parse_bin_from_description()");
@@ -962,33 +944,43 @@ GstStream::doSetVideoPad (GstPad      * const pad,
 void
 GstStream::setRawAudioPad (GstPad * const pad)
 {
-    doSetAudioPad (pad,
-                   "audioconvert ! audioresample ! "
-                   "audio/x-raw-int,rate=16000,channels=1 ! "
-                   "speexenc ! fakesink name=audio sync=true");
+    // TODO Configurable bitrate for faac
+    StRef<String> const chain =
+            st_makeString ("audioconvert ! audioresample ! "
+                           "faac ! fakesink name=audio",
+                           playback_item->sync_to_clock ? " sync=true" : "");
+    doSetAudioPad (pad, chain->mem());
 }
 
 void
 GstStream::setRawVideoPad (GstPad * const pad)
 {
-    doSetVideoPad (pad,
-                   "ffmpegcolorspace ! "
-                   "x264enc bitrate=500 speed-preset=veryfast profile=baseline key-int-max=30 threads=1 sliced-threads=true ! "
-                   "fakesink name=video sync=true");
+    StRef<String> const chain =
+            st_makeString ("ffmpegcolorspace ! "
+                           "x264enc bitrate=500 speed-preset=veryfast profile=baseline "
+                                   "key-int-max=30 threads=1 sliced-threads=true ! "
+                           "fakesink name=video",
+                           playback_item->sync_to_clock ? " sync=true" : "");
+    doSetVideoPad (pad, chain->mem());
 }
 
 void
 GstStream::setAudioPad (GstPad * const pad)
 {
-    doSetAudioPad (pad,
-                   "fakesink name=audio sync=true");
+    StRef<String> const chain =
+            st_makeString ("fakesink name=audio",
+                           playback_item->sync_to_clock ? " sync=true" : "");
+    doSetAudioPad (pad, chain->mem());
 }
 
 void
 GstStream::setVideoPad (GstPad * const pad)
 {
-    doSetVideoPad (pad,
-                   "fakesink name=video sync=true");
+    StRef<String> const chain =
+            st_makeString ("h264parse ! video/x-h264,stream-format=avc,alignment=au ! "
+                           "fakesink name=video",
+                           playback_item->sync_to_clock ? " sync=true" : "");
+    doSetVideoPad (pad, chain->mem());
 }
 
 mt_unlocks (mutex) Result
@@ -1290,6 +1282,22 @@ GstStream::inStatsDataCb (GstPad    * const /* pad */,
 void
 GstStream::doAudioData (GstBuffer * const buffer)
 {
+#if 0
+    {
+	GstCaps * const caps = gst_buffer_get_caps (buffer);
+	{
+	    gchar * const str = gst_caps_to_string (caps);
+	    logD (stream, _func, "caps: ", str);
+	    g_free (str);
+	}
+        gst_caps_unref (caps);
+        logD_ (_func, "stream 0x", fmt_hex, (UintPtr) this, ", "
+              "timestamp ", fmt_def, GST_BUFFER_TIMESTAMP (buffer), ", "
+              "flags 0x", fmt_hex, GST_BUFFER_FLAGS (buffer), ", "
+              "size: ", fmt_def, GST_BUFFER_SIZE (buffer));
+    }
+#endif
+
     // TODO Update current time efficiently.
     updateTime ();
 
@@ -1324,6 +1332,8 @@ GstStream::doAudioData (GstBuffer * const buffer)
 
     VideoStream::AudioFrameType codec_data_type = VideoStream::AudioFrameType::Unknown;
     GstBuffer *codec_data_buffers [2];
+    // Should be unrefed on return.
+    GstBuffer *codec_data_buffer = NULL;
     Count num_codec_data_buffers = 0;
     if (first_audio_frame) {
 	GstCaps * const caps = gst_buffer_get_caps (buffer);
@@ -1363,6 +1373,14 @@ GstStream::doAudioData (GstBuffer * const buffer)
 	    } else {
 	      // AAC
 		audio_codec_id = VideoStream::AudioCodecId::AAC;
+
+                if (char const * const stream_format = gst_structure_get_string (structure, "stream-format")) {
+                    logD_ (_func, "stream-format: ", stream_format);
+                    if (equal (ConstMemory (stream_format, strlen (stream_format)), "adts")) {
+                        // Note: For reference, see http://wiki.multimedia.cx/index.php?title=ADTS
+                        is_adts_aac_stream = true;
+                    }
+                }
 
 		do {
 		  // Processing AacSequenceHeader.
@@ -1474,6 +1492,76 @@ GstStream::doAudioData (GstBuffer * const buffer)
 	}
     }
 
+    if (is_adts_aac_stream) {
+        if (GST_BUFFER_SIZE (buffer) >= 7) {
+            // Bit packing example:
+            // AAAA BBBB  CCCC DDDD
+            // 4321 4321  4321 4321
+            //
+            // 1234
+            // 0001 0010  0011 0100
+            // [] = { 0x12, 0x34 }
+
+            // AAC codec data:
+            //
+            // AAAA ABBB  BDDD DEFG
+            // 5432 1432  1432 1111
+            //
+            // A 5 AudioObjectType
+            // B 4 samplingFrequencyIndex
+            // if (samplingFrequencyIndex == 15) - forbidden
+            //     C 24 samplingFrequency
+            // D 4 channelConfiguration (0-7, last bit reserved)
+            // E 1 frameLengthFlag
+            // F 1 dependsOnCoreCoder = 0
+            // G 1 extensionFlag = 0
+
+            Byte * const adts_header = GST_BUFFER_DATA (buffer);
+            Byte codec_data [2] = { 0, 0 };
+
+            // 2 bits for object type in ADTS => possible values: 1 2 3 4
+            Byte const obj_type = ((adts_header [2] >> 6) & 0x3) + 1;
+            codec_data [0] |= obj_type << 3;
+
+            Byte const rate_idx = (adts_header [2] >> 2) & 0xf;
+            codec_data [0] |= rate_idx >> 1;
+            codec_data [1] |= (rate_idx & 0x1) << 7;
+
+            Byte const channel_config = ((adts_header [2] & 0x1) << 2) | ((adts_header [3] >> 6) & 0x3);
+            codec_data [1] |= channel_config << 3;
+
+            // Just use 1024 samples per frame.
+            // See http://spectralhole.blogspot.ru/2010/09/aac-bistream-flaws-part-2-aac-960-zero.html
+            codec_data [1] |= 0;
+
+            if (!got_adts_aac_codec_data
+                || adts_aac_codec_data [0] != codec_data [0]
+                || adts_aac_codec_data [1] != codec_data [1])
+            {
+                got_adts_aac_codec_data = true;
+                adts_aac_codec_data [0] = codec_data [0];
+                adts_aac_codec_data [1] = codec_data [1];
+
+                codec_data_buffer = gst_buffer_new_and_alloc (2);
+                assert (codec_data_buffer);
+                GST_BUFFER_TIMESTAMP (codec_data_buffer) = GST_BUFFER_TIMESTAMP (buffer);
+                GST_BUFFER_SIZE (codec_data_buffer) = 2;
+                GST_BUFFER_DURATION (codec_data_buffer) = 0;
+                memcpy (GST_BUFFER_DATA (codec_data_buffer), codec_data, 2);
+
+                codec_data_type = VideoStream::AudioFrameType::AacSequenceHeader;
+                codec_data_buffers [0] = codec_data_buffer;
+                num_codec_data_buffers = 1;
+
+                logD_ (_func, "New AAC codec data: 0x", fmt_hex, (Uint32) codec_data [0], " 0x", (Uint32) codec_data [1]);
+            }
+        } else {
+            logE_ (_func,
+                   "AAC ADTS packet is too short. "
+                   "AAC codec data was not extracted. Audio stream will not be playable.");
+        }
+    }
+
     bool skip_frame = false;
     {
 	if (audio_skip_counter > 0) {
@@ -1505,7 +1593,7 @@ GstStream::doAudioData (GstBuffer * const buffer)
 
     if (tmp_audio_codec_id == VideoStream::AudioCodecId::Unknown) {
 	logD (frames, _func, "unknown codec id, dropping audio frame");
-	return;
+	goto _return;
     }
 
     if (num_codec_data_buffers > 0) {
@@ -1568,8 +1656,9 @@ GstStream::doAudioData (GstBuffer * const buffer)
     }
 
     if (skip_frame)
-	return;
+        goto _return;
 
+  {
     Size msg_len = 0;
 
     Uint64 const timestamp_nanosec = (Uint64) (GST_BUFFER_TIMESTAMP (buffer));
@@ -1578,6 +1667,16 @@ GstStream::doAudioData (GstBuffer * const buffer)
 
     PagePool::PageListHead page_list;
 
+    Byte *buffer_data = GST_BUFFER_DATA (buffer);
+    Size  buffer_size = GST_BUFFER_SIZE (buffer);
+    if (is_adts_aac_stream && buffer_size >= 7) {
+        bool const protection_absent = buffer_data [1] & 0x1;
+        Size const adts_header_len = (protection_absent ? 7 : 9);
+
+        buffer_data += adts_header_len;
+        buffer_size -= adts_header_len;
+    }
+
     if (playback_item->enable_prechunking) {
         Size gen_audio_hdr_len = 1;
         if (tmp_audio_codec_id == VideoStream::AudioCodecId::AAC)
@@ -1585,18 +1684,16 @@ GstStream::doAudioData (GstBuffer * const buffer)
 
         RtmpConnection::PrechunkContext prechunk_ctx (gen_audio_hdr_len /* initial_offset */);
         RtmpConnection::fillPrechunkedPages (&prechunk_ctx,
-                                             ConstMemory (GST_BUFFER_DATA (buffer), GST_BUFFER_SIZE (buffer)),
+                                             ConstMemory (buffer_data, buffer_size),
                                              page_pool,
                                              &page_list,
                                              RtmpConnection::DefaultAudioChunkStreamId,
                                              timestamp_nanosec / 1000000,
                                              false /* first_chunk */);
     } else {
-        page_pool->getFillPages (&page_list, ConstMemory (GST_BUFFER_DATA (buffer), GST_BUFFER_SIZE (buffer)));
+        page_pool->getFillPages (&page_list, ConstMemory (buffer_data, buffer_size));
     }
-    msg_len += GST_BUFFER_SIZE (buffer);
-
-//    hexdump (errs, ConstMemory (GST_BUFFER_DATA (buffer), GST_BUFFER_SIZE (buffer)));
+    msg_len += buffer_size;
 
     VideoStream::AudioMessage msg;
     msg.timestamp_nanosec = timestamp_nanosec;
@@ -1611,12 +1708,15 @@ GstStream::doAudioData (GstBuffer * const buffer)
     msg.rate = tmp_audio_rate;
     msg.channels = tmp_audio_channels;
 
-//    logD_ (_func, fmt_hex, msg.timestamp_nanosec);
-
     // TODO unlock/lock?
     video_stream->fireAudioMessage (&msg);
 
     page_pool->msgUnref (page_list.first);
+  }
+
+_return:
+    if (codec_data_buffer)
+        gst_buffer_unref (codec_data_buffer);
 }
 
 gboolean
@@ -1684,14 +1784,6 @@ GstStream::doVideoData (GstBuffer * const buffer)
     }
 #endif
 
-#if 0
-    // TEST
-    if (GST_BUFFER_SIZE (buffer) <= 64) {
-	logD_ (_func, "Ignoring small buffer");
-	return;
-    }
-#endif
-
     mutex.lock ();
 
     rx_video_bytes += GST_BUFFER_SIZE (buffer);
@@ -1699,7 +1791,6 @@ GstStream::doVideoData (GstBuffer * const buffer)
     last_frame_time = getTime ();
     logD (frames, _func, "last_frame_time: 0x", fmt_hex, last_frame_time);
 
-    GstBuffer *avc_codec_data_buffer = NULL;
     if (first_video_frame) {
 	first_video_frame = false;
 
@@ -1720,7 +1811,10 @@ GstStream::doVideoData (GstBuffer * const buffer)
 	} else
 	if (equal (st_name_mem, "video/x-h264")) {
 	   video_codec_id = VideoStream::VideoCodecId::AVC;
+           is_h264_stream = true;
 
+#if 0
+// Deprecated
 	   do {
 	     // Processing AvcSequenceHeader
 
@@ -1738,6 +1832,7 @@ GstStream::doVideoData (GstBuffer * const buffer)
 	       avc_codec_data_buffer = gst_value_get_buffer (val);
 	       logD (frames, _func, "avc_codec_data_buffer: 0x", fmt_hex, (UintPtr) avc_codec_data_buffer);
 	   } while (0);
+#endif
 	} else
 	if (equal (st_name_mem, "video/x-vp6")) {
 	   video_codec_id = VideoStream::VideoCodecId::VP6;
@@ -1789,74 +1884,98 @@ GstStream::doVideoData (GstBuffer * const buffer)
 	skip_frame = true;
     }
 
-    if (avc_codec_data_buffer) {
+    if (is_h264_stream) {
       // Reporting AVC codec data if needed.
 
-        // Timestamps for codec data buffers are seemingly random.
-//	Uint64 const timestamp_nanosec = (Uint64) (GST_BUFFER_TIMESTAMP (avc_codec_data_buffer));
-        Uint64 const timestamp_nanosec = 0;
+        bool report_avc_codec_data = false;
+        {
+            GstCaps * const caps = gst_buffer_get_caps (buffer);
+            GstStructure * const st = gst_caps_get_structure (caps, 0);
 
-	Size msg_len = 0;
+            do {
+                GValue const * const val = gst_structure_get_value (st, "codec_data");
+                if (!val || !GST_VALUE_HOLDS_BUFFER (val))
+                   break;
 
-	logD (frames, _func, "AVC SEQUENCE HEADER");
-	if (logLevelOn (frames, LogLevel::D)) {
-            logLock ();
-	    hexdump (logs, ConstMemory (GST_BUFFER_DATA (avc_codec_data_buffer), GST_BUFFER_SIZE (avc_codec_data_buffer)));
-            logUnlock ();
+                GstBuffer * const new_buffer = gst_value_get_buffer (val);
+                if (avc_codec_data_buffer) {
+                    if (equal (ConstMemory (GST_BUFFER_DATA (avc_codec_data_buffer),
+                                            GST_BUFFER_SIZE (avc_codec_data_buffer)),
+                               ConstMemory (GST_BUFFER_DATA (new_buffer),
+                                            GST_BUFFER_SIZE (new_buffer))))
+                    {
+                      // Codec data has not changed.
+                        break;
+                    }
+
+                    gst_buffer_unref (avc_codec_data_buffer);
+                }
+
+                avc_codec_data_buffer = new_buffer;
+                gst_buffer_ref (avc_codec_data_buffer);
+                report_avc_codec_data = true;
+            } while (0);
+
+            gst_caps_unref (caps);
         }
 
-#if 0
-	// TEST
-	if (GST_BUFFER_SIZE (avc_codec_data_buffer) >= 4) {
-	    GST_BUFFER_DATA (avc_codec_data_buffer) [0] = 0x01;
-	    GST_BUFFER_DATA (avc_codec_data_buffer) [1] = 0x4d;
-	    GST_BUFFER_DATA (avc_codec_data_buffer) [2] = 0x40;
-	    GST_BUFFER_DATA (avc_codec_data_buffer) [3] = 0x28;
-	}
-#endif
+        if (report_avc_codec_data) {
+            // Timestamps for codec data buffers are seemingly random.
+//            Uint64 const timestamp_nanosec = (Uint64) (GST_BUFFER_TIMESTAMP (avc_codec_data_buffer));
+            Uint64 const timestamp_nanosec = 0;
 
-        PagePool::PageListHead page_list;
+            Size msg_len = 0;
 
-        if (playback_item->enable_prechunking) {
-            RtmpConnection::PrechunkContext prechunk_ctx (5 /* initial_offset: FLV AVC header length */);
-            RtmpConnection::fillPrechunkedPages (&prechunk_ctx,
-                                                 ConstMemory (GST_BUFFER_DATA (avc_codec_data_buffer),
-                                                              GST_BUFFER_SIZE (avc_codec_data_buffer)),
-                                                 page_pool,
-                                                 &page_list,
-                                                 RtmpConnection::DefaultVideoChunkStreamId,
-                                                 timestamp_nanosec / 1000000,
-                                                 false /* first_chunk */);
-        } else {
-            page_pool->getFillPages (&page_list,
-                                     ConstMemory (GST_BUFFER_DATA (avc_codec_data_buffer),
-                                                  GST_BUFFER_SIZE (avc_codec_data_buffer)));
-        }
-	msg_len += GST_BUFFER_SIZE (avc_codec_data_buffer);
+            if (logLevelOn (frames, LogLevel::D)) {
+                logLock ();
+                log_unlocked__ (_func, "AVC SEQUENCE HEADER");
+                hexdump (logs, ConstMemory (GST_BUFFER_DATA (avc_codec_data_buffer), GST_BUFFER_SIZE (avc_codec_data_buffer)));
+                logUnlock ();
+            }
 
-	VideoStream::VideoMessage msg;
-	msg.timestamp_nanosec = timestamp_nanosec;
-	msg.prechunk_size = (playback_item->enable_prechunking ? RtmpConnection::PrechunkSize : 0);
-	msg.frame_type = VideoStream::VideoFrameType::AvcSequenceHeader;
-	msg.codec_id = tmp_video_codec_id;
+            PagePool::PageListHead page_list;
 
-	msg.page_pool = page_pool;
-	msg.page_list = page_list;
-	msg.msg_len = msg_len;
-	msg.msg_offset = 0;
+            if (playback_item->enable_prechunking) {
+                RtmpConnection::PrechunkContext prechunk_ctx (5 /* initial_offset: FLV AVC header length */);
+                RtmpConnection::fillPrechunkedPages (&prechunk_ctx,
+                                                     ConstMemory (GST_BUFFER_DATA (avc_codec_data_buffer),
+                                                                  GST_BUFFER_SIZE (avc_codec_data_buffer)),
+                                                     page_pool,
+                                                     &page_list,
+                                                     RtmpConnection::DefaultVideoChunkStreamId,
+                                                     timestamp_nanosec / 1000000,
+                                                     false /* first_chunk */);
+            } else {
+                page_pool->getFillPages (&page_list,
+                                         ConstMemory (GST_BUFFER_DATA (avc_codec_data_buffer),
+                                                      GST_BUFFER_SIZE (avc_codec_data_buffer)));
+            }
+            msg_len += GST_BUFFER_SIZE (avc_codec_data_buffer);
 
-        if (logLevelOn (frames, LogLevel::D)) {
-            logD_ (_func, "Firing video message (AVC sequence header):");
-            logLock ();
-            PagePool::dumpPages (logs, &page_list);
-            logUnlock ();
-        }
+            VideoStream::VideoMessage msg;
+            msg.timestamp_nanosec = timestamp_nanosec;
+            msg.prechunk_size = (playback_item->enable_prechunking ? RtmpConnection::PrechunkSize : 0);
+            msg.frame_type = VideoStream::VideoFrameType::AvcSequenceHeader;
+            msg.codec_id = tmp_video_codec_id;
 
-        // TODO unlock/lock?
-	video_stream->fireVideoMessage (&msg);
+            msg.page_pool = page_pool;
+            msg.page_list = page_list;
+            msg.msg_len = msg_len;
+            msg.msg_offset = 0;
 
-	page_pool->msgUnref (page_list.first);
-    } // if (avc_codec_data_buffer)
+            if (logLevelOn (frames, LogLevel::D)) {
+                logD_ (_func, "Firing video message (AVC sequence header):");
+                logLock ();
+                PagePool::dumpPages (logs, &page_list);
+                logUnlock ();
+            }
+
+            // TODO unlock/lock?
+            video_stream->fireVideoMessage (&msg);
+
+            page_pool->msgUnref (page_list.first);
+        } // if (report_avc_codec_data)
+    } // if (is_h264_stream)
 
     if (skip_frame) {
 	logD (frames, _func, "skipping frame");
@@ -1985,7 +2104,7 @@ GstStream::busSyncHandler (GstBus     * const /* bus */,
     logD (bus, _func, gst_message_type_get_name (GST_MESSAGE_TYPE (msg)), ", src: 0x", fmt_hex, (UintPtr) GST_MESSAGE_SRC (msg));
 
     GstStream * const self = static_cast <GstStream*> (_self);
-    logD_ (_func, "self->playbin: 0x", fmt_hex, (UintPtr) self->playbin);
+    logD (bus, _func, "self->playbin: 0x", fmt_hex, (UintPtr) self->playbin);
 
     self->mutex.lock ();
     if (GST_MESSAGE_SRC (msg) == GST_OBJECT (self->playbin)) {
@@ -2214,9 +2333,12 @@ GstStream::doCreatePipeline ()
 
     if (playback_item->spec_kind == PlaybackItem::SpecKind::Chain) {
 	createPipelineForChainSpec ();
-    } else {
+    } else
+    if (playback_item->spec_kind == PlaybackItem::SpecKind::Uri) {
 //	createPipelineForUri ();
 	createSmartPipelineForUri ();
+    } else {
+        assert (playback_item->spec_kind == PlaybackItem::SpecKind::None);
     }
 }
 
@@ -2515,10 +2637,16 @@ GstStream::GstStream ()
       got_audio (false),
 
       first_audio_frame (true),
+      first_video_frame (true),
+
       audio_skip_counter (0),
       video_skip_counter (0),
 
-      first_video_frame (true),
+      is_adts_aac_stream (false),
+      got_adts_aac_codec_data (false),
+
+      is_h264_stream (false),
+      avc_codec_data_buffer (NULL),
 
       prv_audio_timestamp (0),
 
@@ -2558,6 +2686,9 @@ GstStream::~GstStream ()
 	gst_caps_unref (mix_audio_caps);
     if (mix_video_caps)
 	gst_caps_unref (mix_video_caps);
+
+    if (avc_codec_data_buffer)
+        gst_buffer_unref (avc_codec_data_buffer);
 }
 
 }
