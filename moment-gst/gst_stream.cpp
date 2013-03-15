@@ -31,6 +31,7 @@ static LogGroup libMary_logGroup_stream   ("mod_gst.stream",   LogLevel::I);
 static LogGroup libMary_logGroup_bus      ("mod_gst.bus",      LogLevel::I);
 static LogGroup libMary_logGroup_frames   ("mod_gst.frames",   LogLevel::E); // E is the default
 static LogGroup libMary_logGroup_novideo  ("mod_gst.novideo",  LogLevel::I);
+static LogGroup libMary_logGroup_plug     ("mod_gst.autoplug", LogLevel::I);
 
 void
 GstStream::workqueueThreadFunc (void * const _self)
@@ -500,7 +501,7 @@ _return:
 void
 GstStream::createSmartPipelineForUri ()
 {
-    logD_ (_this_func_);
+//    logD_ (_this_func_);
 
     assert (playback_item->spec_kind == PlaybackItem::SpecKind::Uri);
 
@@ -538,7 +539,7 @@ GstStream::createSmartPipelineForUri ()
     g_signal_connect (decodebin, "pad-added", G_CALLBACK (decodebinPadAdded), this);
 
     this->playbin = pipeline;
-    logD_ (_this_func, "this->playbin: 0x", fmt_hex, (UintPtr) this->playbin);
+//    logD_ (_this_func, "this->playbin: 0x", fmt_hex, (UintPtr) this->playbin);
     gst_object_ref (this->playbin);
 
     gst_bin_add_many (GST_BIN (pipeline), decodebin, NULL);
@@ -664,9 +665,9 @@ GstStream::decodebinAutoplugContinue (GstElement * const /* bin */,
 {
     GstStream * const self = static_cast <GstStream*> (_self);
 
-    logD_ (_func_);
+    logD (plug, _func_);
 
-    {
+    if (logLevelOn (plug, LogLevel::Debug)) {
         gchar * const str = gst_caps_to_string (caps);
         logD_ (_func, "caps: ", str);
         g_free (str);
@@ -674,14 +675,14 @@ GstStream::decodebinAutoplugContinue (GstElement * const /* bin */,
 
     if (!self->playback_item->force_transcode && !self->playback_item->force_transcode_audio) {
         if (isMpegAudioCaps (caps)) {
-            logD_ (_func, "autoplugged mpeg audio");
+            logD (plug, _func, "autoplugged mpeg audio");
             return FALSE;
         }
     }
 
     if (!self->playback_item->force_transcode && !self->playback_item->force_transcode_video) {
         if (isH264VideoCaps (caps)) {
-            logD_ (_func, "autoplugged h.264 video");
+            logD (plug, _func, "autoplugged h.264 video");
             return FALSE;
         }
     }
@@ -696,17 +697,17 @@ GstStream::decodebinPadAdded (GstElement * const /* element */,
 {
     GstStream * const self = static_cast <GstStream*> (_self);
 
-    logD_ (_func_);
+    logD (plug, _func_);
 
     GstCaps * const caps = gst_pad_get_caps (new_pad);
     if (!caps) {
-        logD_ (_func, "NULL caps");
+        logD (plug, _func, "NULL caps");
         return;
     }
 
     {
         gchar * const str = gst_caps_to_string (caps);
-        logD_ (_func, "caps: ", str);
+        logD (plug, _func, "caps: ", str);
         g_free (str);
     }
 
@@ -769,11 +770,11 @@ GstStream::doSetPad (GstPad            * const pad,
         GError *err = NULL;
         // TODO configurable encoder
         String const chain_str (chain);
-        logD_ (_func, "calling gst_parse_bin_from_description()");
+        logD (plug, _func, "calling gst_parse_bin_from_description()");
         encoder_bin = gst_parse_bin_from_description (chain_str.cstr(),
                                                       TRUE /* ghost_unlinked_pads */,
                                                       &err);
-        logD_ (_func, "gst_parse_bin_from_description() returned");
+        logD (plug, _func, "gst_parse_bin_from_description() returned");
         if (!encoder_bin) {
             logE_ (_func, "gst_parse_bin_from_description() failed: ", err->message);
             goto _failure;
@@ -838,24 +839,24 @@ GstStream::doSetPad (GstPad            * const pad,
         }
         gst_object_unref (sink_pad);
 
-        logD_ (_func, "setting state to PLAYING, locked: ", GST_OBJECT_FLAG_IS_SET (encoder_bin, GST_ELEMENT_LOCKED_STATE));
+        logD (plug, _func, "setting state to PLAYING, locked: ", GST_OBJECT_FLAG_IS_SET (encoder_bin, GST_ELEMENT_LOCKED_STATE));
         {
             GstStateChangeReturn res = gst_element_set_state (encoder_bin, GST_STATE_PLAYING);
             switch (res) {
                 case GST_STATE_CHANGE_FAILURE:
-                    logD_ (_func, "GST_STATE_CHANGE_FAILURE");
+                    logD (plug, _func, "GST_STATE_CHANGE_FAILURE");
                     break;
                 case GST_STATE_CHANGE_SUCCESS:
-                    logD_ (_func, "GST_STATE_CHANGE_SUCCESS");
+                    logD (plug, _func, "GST_STATE_CHANGE_SUCCESS");
                     break;
                 case GST_STATE_CHANGE_ASYNC:
-                    logD_ (_func, "GST_STATE_CHANGE_ASYNC");
+                    logD (plug, _func, "GST_STATE_CHANGE_ASYNC");
                     break;
                 case GST_STATE_CHANGE_NO_PREROLL:
-                    logD_ (_func, "GST_STATE_CHANGE_NO_PREROLL");
+                    logD (plug, _func, "GST_STATE_CHANGE_NO_PREROLL");
                     break;
                 default:
-                    logD_ (_func, "Unknown GstStateChangeReturn");
+                    logD (plug, _func, "Unknown GstStateChangeReturn");
             }
             if (res == GST_STATE_CHANGE_FAILURE) {
                 logE_ (_func, "gst_element_set_state() failed (PLAYING)");
@@ -889,7 +890,7 @@ void
 GstStream::doSetAudioPad (GstPad      * const pad,
                           ConstMemory   const chain)
 {
-    logD_ (_this_func, chain);
+    logD (plug, _this_func, chain);
 
     mutex.lock ();
     if (got_audio_pad) {
@@ -897,7 +898,7 @@ GstStream::doSetAudioPad (GstPad      * const pad,
 
 	GstCaps * const caps = gst_pad_get_caps (pad);
         gchar * const str = gst_caps_to_string (caps);
-        logD_ (_this_func, "ignoring extra audio pad, caps: ", str);
+        logD (plug, _this_func, "ignoring extra audio pad, caps: ", str);
         g_free (str);
         gst_caps_unref (caps);
 
@@ -917,7 +918,7 @@ void
 GstStream::doSetVideoPad (GstPad      * const pad,
                           ConstMemory   const chain)
 {
-    logD_ (_this_func, chain);
+    logD (plug, _this_func, chain);
 
     mutex.lock ();
     if (got_video_pad) {
@@ -925,7 +926,7 @@ GstStream::doSetVideoPad (GstPad      * const pad,
 
 	GstCaps * const caps = gst_pad_get_caps (pad);
         gchar * const str = gst_caps_to_string (caps);
-        logD_ (_this_func, "ignoring extra video pad, caps: ", str);
+        logD (plug, _this_func, "ignoring extra video pad, caps: ", str);
         g_free (str);
         gst_caps_unref (caps);
 
@@ -2124,7 +2125,7 @@ GstStream::busSyncHandler (GstBus     * const /* bus */,
 			logD (bus, _func, "PAUSED");
 
 			if (self->initial_seek_pending) {
-                            logD_ (_func, "setting 'initial_seek_pending' to 'false'");
+//                            logD_ (_func, "setting 'initial_seek_pending' to 'false'");
                             self->initial_seek_pending = false;
 			    if (self->initial_seek > 0) {
 				self->seek_pending = true;

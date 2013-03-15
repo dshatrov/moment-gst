@@ -1113,7 +1113,7 @@ MomentGstModule::httpRequest (HttpRequest  * const mt_nonnull req,
     }
 
     if (!req->getKeepalive())
-        conn_sender->closeAfterFlush();
+        conn_sender->closeAfterFlush ();
 
     return Result::Success;
 

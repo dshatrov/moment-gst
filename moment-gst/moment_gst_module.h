@@ -114,7 +114,6 @@ private:
 				       void         *_self);
 
     mt_iface (HttpService::Frontend)
-    mt_begin
       static HttpService::HttpHandler admin_http_handler;
 
       static Result adminHttpRequest (HttpRequest  * mt_nonnull req,
@@ -125,12 +124,12 @@ private:
 
       static HttpService::HttpHandler http_handler;
 
-      static Result httpRequest (HttpRequest * mt_nonnull req,
+      static Result httpRequest (HttpRequest  * mt_nonnull req,
 				 Sender       * mt_nonnull conn_sender,
 				 Memory const &msg_body,
 				 void        ** mt_nonnull ret_msg_data,
 				 void         *_self);
-    mt_end
+    mt_iface_end
 
     void createPlaylistChannel (ConstMemory     playlist_filename,
                                 ChannelOptions *channel_opts,
