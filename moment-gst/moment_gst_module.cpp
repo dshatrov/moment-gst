@@ -163,6 +163,8 @@ MomentGstModule::setPosition (ConstMemory const channel_name,
 
 void
 MomentGstModule::createPlaylistChannel (ConstMemory      const playlist_filename,
+                                        bool             const is_dir,
+                                        bool             const dir_re_read,
                                         ChannelOptions * const channel_opts,
                                         PushAgent      * const push_agent)
 {
@@ -187,7 +189,15 @@ MomentGstModule::createPlaylistChannel (ConstMemory      const playlist_filename
     mutex.unlock ();
     channel_set.addChannel (channel, channel_opts->channel_name->mem());
 
-    {
+    if (is_dir) {
+        if (!channel->getPlayback()->loadPlaylistDirectory (playlist_filename,
+                                                            dir_re_read,
+                                                            false /* keep_cur_item */,
+                                                            channel_opts->default_item))
+        {
+            logE_ (_func, "Could not create playlist for directory \"", playlist_filename, "\"");
+        }
+    } else {
 	Ref<String> err_msg;
 	if (!channel->getPlayback()->loadPlaylistFile (playlist_filename,
                                                        false /* keep_cur_item */,
@@ -1411,6 +1421,7 @@ MomentGstModule::parseStreamsConfigSection ()
 	    StRef<String> chain;
 	    StRef<String> uri;
 	    StRef<String> playlist;
+            StRef<String> playlist_dir;
 	    {
 		int num_set_opts = 0;
 
@@ -1441,11 +1452,28 @@ MomentGstModule::parseStreamsConfigSection ()
 		    }
 		}
 
+                {
+                    MConfig::Option * const opt = item_section->getOption ("dir");
+                    if (opt && opt->getValue()) {
+                        playlist_dir = opt->getValue()->getAsString();
+                        logD_ (_func, "dir: ", playlist_dir);
+                        ++num_set_opts;
+                    }
+                }
+
 		if (num_set_opts > 1) {
 		    logW_ (_func, "Only one of uri/chain/playlist "
 			   "should be specified for stream \"", stream_name, "\"");
 		}
 	    }
+
+            bool playlist_dir_re_read = true;
+            {
+                ConstMemory const opt_name = "dir_re_read";
+                if (!configSectionGetBoolean (item_section, opt_name, &playlist_dir_re_read, playlist_dir_re_read))
+                    return Result::Failure;
+                logI_ (_func, "stream ", stream_name->mem(), ": ", opt_name, ": ", playlist_dir_re_read);
+            }
 
 	    StRef<String> record_path;
 	    {
@@ -1652,7 +1680,20 @@ MomentGstModule::parseStreamsConfigSection ()
 	    if (playlist && !playlist->isNull()) {
                 logD_ (_func, "playlist, channel \"", opts->channel_name, "\"");
 
-		createPlaylistChannel (playlist->mem(), opts, push_agent);
+		createPlaylistChannel (playlist->mem(),
+                                       false /* is_dir */,
+                                       false /* dir_re_read */,
+                                       opts,
+                                       push_agent);
+            } else
+            if (playlist_dir && !playlist_dir->isNull()) {
+                logD_ (_func, "playlist dir, channel \"", opts->channel_name, "\"");
+
+                createPlaylistChannel (playlist_dir->mem(),
+                                       true /* is_dir */,
+                                       playlist_dir_re_read,
+                                       opts,
+                                       push_agent);
 	    } else {
 		logW_ (_func, "None of chain/uri/playlist specified for stream \"", stream_name, "\"");
 		createDummyChannel (stream_name->mem(),

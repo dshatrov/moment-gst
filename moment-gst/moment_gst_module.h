@@ -132,6 +132,8 @@ private:
     mt_iface_end
 
     void createPlaylistChannel (ConstMemory     playlist_filename,
+                                bool            is_dir,
+                                bool            dir_re_read,
                                 ChannelOptions *channel_opts,
                                 PushAgent      *push_agent = NULL);
 
