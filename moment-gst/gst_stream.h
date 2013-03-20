@@ -259,15 +259,14 @@ private:
   mt_iface_end
 
 public:
+  mt_iface (MediaSource)
     void createPipeline ();
-
     void releasePipeline ();
-
     void reportStatusEvents ();
 
-    void getTrafficStats (TrafficStats *ret_traffic_stats);
-
+    void getTrafficStats (TrafficStats * mt_nonnull ret_traffic_stats);
     void resetTrafficStats ();
+  mt_iface_end
 
     mt_const void init (CbDesc<MediaSource::Frontend> const &frontend,
                         Timers         *timers,

@@ -1749,6 +1749,7 @@ GstStream::doVideoData (GstBuffer * const buffer)
     logD (frames, _func, "stream 0x", fmt_hex, (UintPtr) this, ", "
 	  "timestamp 0x", fmt_hex, GST_BUFFER_TIMESTAMP (buffer),
           " (", fmt_def, GST_BUFFER_TIMESTAMP (buffer), "), "
+          "size ", GST_BUFFER_SIZE (buffer), ", "
 	  "flags 0x", fmt_hex, GST_BUFFER_FLAGS (buffer));
     if (logLevelOn (frames, LogLevel::Debug))
 	dumpGstBufferFlags (buffer);
@@ -2519,7 +2520,7 @@ GstStream::reportStatusEvents ()
 }
 
 void
-GstStream::getTrafficStats (TrafficStats * const ret_traffic_stats)
+GstStream::getTrafficStats (TrafficStats * const mt_nonnull ret_traffic_stats)
 {
   StateMutexLock l (&mutex);
 
