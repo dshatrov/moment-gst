@@ -1626,6 +1626,14 @@ MomentGstModule::parseStreamsConfigSection ()
                 logI_ (_func, "stream ", stream_name->mem(), ": ", opt_name, ": ", force_transcode_video);
             }
 
+            bool aac_perfect_timestamp = default_channel_opts->default_item->aac_perfect_timestamp;
+            {
+                ConstMemory const opt_name = "aac_perfect_timestamp";
+                if (!configSectionGetBoolean (item_section, opt_name, &aac_perfect_timestamp, aac_perfect_timestamp))
+                    return Result::Failure;
+                logI_ (_func, "stream ", stream_name->mem(), ": ", opt_name, ": ", aac_perfect_timestamp);
+            }
+
             bool sync_to_clock = default_channel_opts->default_item->sync_to_clock;
             {
                 ConstMemory const opt_name = "sync_to_clock";
@@ -1658,6 +1666,7 @@ MomentGstModule::parseStreamsConfigSection ()
                 item->force_transcode = force_transcode;
                 item->force_transcode_audio = force_transcode_audio;
                 item->force_transcode_video = force_transcode_video;
+                item->aac_perfect_timestamp = aac_perfect_timestamp;
                 item->sync_to_clock = sync_to_clock;
             }
 

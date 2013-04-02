@@ -947,21 +947,28 @@ GstStream::setRawAudioPad (GstPad * const pad)
 {
     // TODO Configurable bitrate for faac
     StRef<String> const chain =
-            st_makeString ("audioconvert ! audioresample ! "
-                           "faac ! fakesink name=audio",
-                           playback_item->sync_to_clock ? " sync=true" : "");
+            st_makeString ("audioconvert ! audioresample ! audio/x-raw-int,channels=2 ! "
+                           "faac",
+                           (playback_item->aac_perfect_timestamp ? " perfect-timestamp=true" : ""),
+                           " ! audio/mpeg,mpegversion=4,channels=2,base-profile=lc ! "
+                           "fakesink name=audio",
+                           (playback_item->sync_to_clock ? " sync=true" : ""));
+    logD_ (_func, "chain: ", chain);
     doSetAudioPad (pad, chain->mem());
 }
 
 void
 GstStream::setRawVideoPad (GstPad * const pad)
 {
+    // TODO Configurable bitrate for x264enc
     StRef<String> const chain =
             st_makeString ("ffmpegcolorspace ! "
                            "x264enc bitrate=500 speed-preset=veryfast profile=baseline "
                                    "key-int-max=30 threads=1 sliced-threads=true ! "
+                           "video/x-h264,alignment=au,stream-format=avc,profile=constrained-baseline ! "
                            "fakesink name=video",
                            playback_item->sync_to_clock ? " sync=true" : "");
+    logD_ (_func, "chain: ", chain);
     doSetVideoPad (pad, chain->mem());
 }
 
