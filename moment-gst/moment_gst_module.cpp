@@ -544,7 +544,7 @@ MomentGstModule::httpGetChannelsStat (HttpRequest  * const mt_nonnull req,
 		       false /* do_flush */,
 		       MOMENT_GST__OK_HEADERS ("text/html", content_len),
 		       "\r\n");
-    conn_sender->sendPages (self->page_pool, &page_list, true /* do_flush */);
+    conn_sender->sendPages (self->page_pool, page_list.first, true /* do_flush */);
 
     if (!req->getKeepalive())
         conn_sender->closeAfterFlush();
@@ -662,7 +662,7 @@ MomentGstModule::adminHttpRequest (HttpRequest  * const mt_nonnull req,
 			   false /* do_flush */,
 			   MOMENT_GST__OK_HEADERS ("text/plain", content_len),
 			   "\r\n");
-	conn_sender->sendPages (self->page_pool, &page_list, true /* do_flush */);
+	conn_sender->sendPages (self->page_pool, page_list.first, true /* do_flush */);
 
 	logA_ ("mod_gst 200 ", req->getClientAddress(), " ", req->getRequestLine());
     } else
@@ -706,7 +706,7 @@ MomentGstModule::adminHttpRequest (HttpRequest  * const mt_nonnull req,
 			   false /* do_flush */,
 			   MOMENT_GST__OK_HEADERS ("text/plain", content_len),
 			   "\r\n");
-	conn_sender->sendPages (self->page_pool, &page_list, true /* do_flush */);
+	conn_sender->sendPages (self->page_pool, page_list.first, true /* do_flush */);
 
 	logA_ ("mod_gst 200 ", req->getClientAddress(), " ", req->getRequestLine());
     } else
@@ -876,7 +876,7 @@ MomentGstModule::httpRequest (HttpRequest  * const mt_nonnull req,
 			   false /* do_flush */,
 			   MOMENT_GST__OK_HEADERS ("text/html", content_len),
 			   "\r\n");
-	conn_sender->sendPages (self->page_pool, &page_list, true /* do_flush */);
+	conn_sender->sendPages (self->page_pool, page_list.first, true /* do_flush */);
 
 	logA_ ("mod_gst 200 ", req->getClientAddress(), " ", req->getRequestLine());
     } else
@@ -981,7 +981,7 @@ MomentGstModule::httpRequest (HttpRequest  * const mt_nonnull req,
 			   false /* do_flush */,
 			   MOMENT_GST__OK_HEADERS ("text/html", content_len),
 			   "\r\n");
-	conn_sender->sendPages (self->page_pool, &page_list, true /* do_flush */);
+	conn_sender->sendPages (self->page_pool, page_list.first, true /* do_flush */);
 
 	logA_ ("mod_gst 200 ", req->getClientAddress(), " ", req->getRequestLine());
     } else
@@ -1112,7 +1112,7 @@ MomentGstModule::httpRequest (HttpRequest  * const mt_nonnull req,
 			   false /* do_flush */,
 			   MOMENT_GST__OK_HEADERS ("text/html", content_len),
 			   "\r\n");
-	conn_sender->sendPages (self->page_pool, &page_list, true /* do_flush */);
+	conn_sender->sendPages (self->page_pool, page_list.first, true /* do_flush */);
 
 	logA_ ("mod_gst 200 ", req->getClientAddress(), " ", req->getRequestLine());
     } else {
