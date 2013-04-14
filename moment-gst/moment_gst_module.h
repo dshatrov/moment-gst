@@ -47,7 +47,8 @@ private:
 	mt_const Ref<String> channel_desc;
 	mt_const Ref<String> playlist_filename;
 
-        mt_const Ref<PushAgent> push_agent;
+        mt_const Ref<PushAgent>  push_agent;
+        mt_const Ref<FetchAgent> fetch_agent;
     };
 
     typedef Hash< ChannelEntry,
@@ -135,16 +136,19 @@ private:
                                 bool            is_dir,
                                 bool            dir_re_read,
                                 ChannelOptions *channel_opts,
-                                PushAgent      *push_agent = NULL);
+                                PushAgent      *push_agent  = NULL,
+                                FetchAgent     *fetch_agent = NULL);
 
     void createStreamChannel (ChannelOptions *channel_opts,
                               PlaybackItem   *playback_item,
-                              PushAgent      *push_agent = NULL);
+                              PushAgent      *push_agent  = NULL,
+                              FetchAgent     *fetch_agent = NULL);
 
     void createDummyChannel (ConstMemory  channel_name,
                              ConstMemory  channel_title,
 			     ConstMemory  channel_desc,
-                             PushAgent   *push_agent = NULL);
+                             PushAgent   *push_agent  = NULL,
+                             FetchAgent  *fetch_agent = NULL);
 
     void createPlaylistRecorder (ConstMemory recorder_name,
 				 ConstMemory playlist_filename,

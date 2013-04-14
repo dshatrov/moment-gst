@@ -166,7 +166,8 @@ MomentGstModule::createPlaylistChannel (ConstMemory      const playlist_filename
                                         bool             const is_dir,
                                         bool             const dir_re_read,
                                         ChannelOptions * const channel_opts,
-                                        PushAgent      * const push_agent)
+                                        PushAgent      * const push_agent,
+                                        FetchAgent     * const fetch_agent)
 {
     ChannelEntry * const channel_entry = new (std::nothrow) ChannelEntry;
     assert (channel_entry);
@@ -177,7 +178,8 @@ MomentGstModule::createPlaylistChannel (ConstMemory      const playlist_filename
     channel_entry->channel_desc  = grab (new (std::nothrow) String (channel_opts->channel_desc->mem()));
     channel_entry->playlist_filename = grab (new (std::nothrow) String (playlist_filename));
 
-    channel_entry->push_agent = push_agent;
+    channel_entry->push_agent  = push_agent;
+    channel_entry->fetch_agent = fetch_agent;
 
     Ref<Channel> const channel = grab (new (std::nothrow) Channel);
     channel_entry->channel = channel;
@@ -218,7 +220,8 @@ MomentGstModule::createPlaylistChannel (ConstMemory      const playlist_filename
 void
 MomentGstModule::createStreamChannel (ChannelOptions * const channel_opts,
                                       PlaybackItem   * const playback_item,
-                                      PushAgent      * const push_agent)
+                                      PushAgent      * const push_agent,
+                                      FetchAgent     * const fetch_agent)
 {
     ChannelEntry * const channel_entry = new (std::nothrow) ChannelEntry;
     assert (channel_entry);
@@ -229,7 +232,8 @@ MomentGstModule::createStreamChannel (ChannelOptions * const channel_opts,
     channel_entry->channel_desc  = grab (new (std::nothrow) String (channel_opts->channel_desc->mem()));
     channel_entry->playlist_filename = NULL;
 
-    channel_entry->push_agent = push_agent;
+    channel_entry->push_agent  = push_agent;
+    channel_entry->fetch_agent = fetch_agent;
 
     Ref<Channel> const channel = grab (new (std::nothrow) Channel);
     channel_entry->channel = channel;
@@ -254,7 +258,8 @@ void
 MomentGstModule::createDummyChannel (ConstMemory   const channel_name,
                                      ConstMemory   const channel_title,
 				     ConstMemory   const channel_desc,
-                                     PushAgent   * const push_agent)
+                                     PushAgent   * const push_agent,
+                                     FetchAgent  * const fetch_agent)
 {
     ChannelEntry * const channel_entry = new (std::nothrow) ChannelEntry;
     assert (channel_entry);
@@ -264,7 +269,8 @@ MomentGstModule::createDummyChannel (ConstMemory   const channel_name,
     channel_entry->channel_desc  = grab (new (std::nothrow) String (channel_desc));
     channel_entry->playlist_filename = NULL;
 
-    channel_entry->push_agent = push_agent;
+    channel_entry->push_agent  = push_agent;
+    channel_entry->fetch_agent = fetch_agent;
 
     Ref<Channel> const channel = grab (new (std::nothrow) Channel);
     channel_entry->channel = channel;
@@ -1576,12 +1582,37 @@ MomentGstModule::parseStreamsConfigSection ()
                 if (push_uri) {
                     Ref<PushProtocol> const push_protocol = moment->getPushProtocolForUri (push_uri->mem());
                     if (push_protocol) {
-                        push_agent = grab (new PushAgent);
+                        push_agent = grab (new (std::nothrow) PushAgent);
                         push_agent->init (stream_name->mem(),
                                           push_protocol,
                                           push_uri      ? push_uri->mem()      : ConstMemory(),
                                           push_username ? push_username->mem() : ConstMemory(),
                                           push_password ? push_password->mem() : ConstMemory());
+                    }
+                }
+            }
+
+            Ref<FetchAgent> fetch_agent;
+            {
+                Ref<String> fetch_uri;
+                {
+                    ConstMemory const opt_name = "fetch_uri";
+                    MConfig::Option * const opt = item_section->getOption (opt_name);
+                    if (opt && opt->getValue()) {
+                        fetch_uri = opt->getValue()->getAsString();
+                        logD_ (_func, opt_name, ": ", fetch_uri);
+                    }
+                }
+
+                if (fetch_uri) {
+                    Ref<FetchProtocol> const fetch_protocol = moment->getFetchProtocolForUri (fetch_uri->mem());
+                    if (fetch_protocol) {
+                        fetch_agent = grab (new (std::nothrow) FetchAgent);
+                        fetch_agent->init (moment,
+                                           fetch_protocol,
+                                           stream_name->mem(),
+                                           fetch_uri->mem(),
+                                           1000 /* reconnect_interval_millisec */ /* TODO Config parameter */);
                     }
                 }
             }
@@ -1676,7 +1707,7 @@ MomentGstModule::parseStreamsConfigSection ()
                 item->stream_spec = st_grab (new (std::nothrow) String (chain->mem()));
                 item->spec_kind = PlaybackItem::SpecKind::Chain;
 
-		createStreamChannel (opts, item, push_agent);
+		createStreamChannel (opts, item, push_agent, fetch_agent);
 	    } else
 	    if (uri && !uri->isNull()) {
                 logD_ (_func, "uri, channel \"", opts->channel_name, "\"");
@@ -1684,7 +1715,7 @@ MomentGstModule::parseStreamsConfigSection ()
                 item->stream_spec = st_grab (new (std::nothrow) String (uri->mem()));
                 item->spec_kind = PlaybackItem::SpecKind::Uri;
 
-		createStreamChannel (opts, item, push_agent);
+		createStreamChannel (opts, item, push_agent, fetch_agent);
 	    } else
 	    if (playlist && !playlist->isNull()) {
                 logD_ (_func, "playlist, channel \"", opts->channel_name, "\"");
@@ -1693,7 +1724,8 @@ MomentGstModule::parseStreamsConfigSection ()
                                        false /* is_dir */,
                                        false /* dir_re_read */,
                                        opts,
-                                       push_agent);
+                                       push_agent,
+                                       fetch_agent);
             } else
             if (playlist_dir && !playlist_dir->isNull()) {
                 logD_ (_func, "playlist dir, channel \"", opts->channel_name, "\"");
@@ -1702,13 +1734,15 @@ MomentGstModule::parseStreamsConfigSection ()
                                        true /* is_dir */,
                                        playlist_dir_re_read,
                                        opts,
-                                       push_agent);
+                                       push_agent,
+                                       fetch_agent);
 	    } else {
 		logW_ (_func, "None of chain/uri/playlist specified for stream \"", stream_name, "\"");
 		createDummyChannel (stream_name->mem(),
                                     channel_title->mem(),
                                     channel_desc->mem(),
-                                    push_agent);
+                                    push_agent,
+                                    fetch_agent);
 	    }
 
 	}
