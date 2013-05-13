@@ -67,6 +67,12 @@ private:
 
     mt_const Ref<Thread> workqueue_thread;
 
+    DeferredProcessor::Task deferred_task;
+    DeferredProcessor::Registration deferred_reg;
+    static bool deferredTask (void *_self);
+    void reportStatusEvents ();
+    void doReportStatusEvents ();
+
     mt_mutex (mutex)
     mt_begin
 
@@ -262,23 +268,22 @@ public:
   mt_iface (MediaSource)
     void createPipeline ();
     void releasePipeline ();
-    void reportStatusEvents ();
 
     void getTrafficStats (TrafficStats * mt_nonnull ret_traffic_stats);
     void resetTrafficStats ();
   mt_iface_end
 
     mt_const void init (CbDesc<MediaSource::Frontend> const &frontend,
-                        Timers         *timers,
-			PagePool       *page_pool,
-			VideoStream    *video_stream,
-			VideoStream    *mix_video_stream,
-			Time            initial_seek,
-                        ChannelOptions *channel_opts,
-                        PlaybackItem   *playback_item);
+                        Timers            *timers,
+                        DeferredProcessor *deferred_processor,
+			PagePool          *page_pool,
+			VideoStream       *video_stream,
+			VideoStream       *mix_video_stream,
+			Time               initial_seek,
+                        ChannelOptions    *channel_opts,
+                        PlaybackItem      *playback_item);
 
-    GstStream ();
-
+     GstStream ();
     ~GstStream ();
 };
 

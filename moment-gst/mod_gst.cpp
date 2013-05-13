@@ -55,7 +55,7 @@ static void momentGstInit ()
     logI_ (_func, "Initializing mod_gst");
 
     {
-	Ref<Thread> const thread = grab (new Thread (
+	Ref<Thread> const thread = grab (new (std::nothrow) Thread (
 		CbDesc<Thread::ThreadFunc> (glibLoopThreadFunc, NULL, NULL)));
 	if (!thread->spawn (false /* joinable */))
 	    logE_ (_func, "Failed to spawn glib main loop thread: ", exc->toString());
@@ -64,7 +64,8 @@ static void momentGstInit ()
     MomentServer * const moment = MomentServer::getInstance();
     MConfig::Config * const config = moment->getConfig();
 
-    MomentGstModule * const gst_module = new MomentGstModule;
+    MomentGstModule * const gst_module = new (std::nothrow) MomentGstModule;
+    assert (gst_module);
     moment->getEventInformer()->subscribe (
             CbDesc<MomentServer::Events> (&server_events, gst_module, NULL));
 

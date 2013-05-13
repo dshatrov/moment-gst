@@ -34,6 +34,20 @@ static LogGroup libMary_logGroup_novideo  ("mod_gst.novideo",  LogLevel::I);
 static LogGroup libMary_logGroup_plug     ("mod_gst.autoplug", LogLevel::I);
 
 void
+GstStream::reportStatusEvents ()
+{
+    deferred_reg.scheduleTask (&deferred_task, false /* permanent */);
+}
+
+bool
+GstStream::deferredTask (void * const _self)
+{
+    GstStream * const self = static_cast <GstStream*> (_self);
+    self->doReportStatusEvents ();
+    return false /* do not reschedule */;
+}
+
+void
 GstStream::workqueueThreadFunc (void * const _self)
 {
     GstStream * const self = static_cast <GstStream*> (_self);
@@ -1033,8 +1047,6 @@ GstStream::setPipelinePlaying ()
 	logD (pipeline, _func, "Setting pipeline state to NULL");
 	if (gst_element_set_state (chain_el, GST_STATE_NULL) == GST_STATE_CHANGE_FAILURE)
 	    logE_ (_func, "gst_element_set_state() failed (NULL)");
-
-//      doReleasePipeline ();
     } else {
       mutex.unlock ();
     }
@@ -1135,7 +1147,7 @@ GstStream::releasePipeline ()
         }
     }
 
-    Ref<WorkqueueItem> const new_item = grab (new WorkqueueItem);
+    Ref<WorkqueueItem> const new_item = grab (new (std::nothrow) WorkqueueItem);
     new_item->item_type = WorkqueueItem::ItemType_ReleasePipeline;
 
     workqueue_list.prepend (new_item);
@@ -1147,8 +1159,10 @@ GstStream::releasePipeline ()
     workqueue_thread = NULL;
     mutex.unlock ();
 
-    if (join)
-        tmp_workqueue_thread->join ();
+    if (join) {
+        if (tmp_workqueue_thread)
+            tmp_workqueue_thread->join ();
+    }
 }
 
 mt_mutex (mutex) void
@@ -1171,7 +1185,7 @@ GstStream::reportMetaData ()
     }
 
     logD (stream, _func, "Firing video message");
-    // TODO unlock/lock?
+    // TODO unlock/lock? (locked event == WRONG)
     video_stream->fireVideoMessage (&msg);
 
     page_pool->msgUnref (msg.page_list.first);
@@ -1270,7 +1284,7 @@ gstStateToString (GstState const state)
 	    mem = "Unknown";
     }
 
-    return grab (new String (mem));
+    return grab (new (std::nothrow) String (mem));
 }
 
 gboolean
@@ -1656,7 +1670,6 @@ GstStream::doAudioData (GstBuffer * const buffer)
 	    msg.msg_len = msg_len;
 	    msg.msg_offset = 0;
 
-            // TODO unlock/lock?
 	    video_stream->fireAudioMessage (&msg);
 
 	    page_pool->msgUnref (page_list.first);
@@ -1716,7 +1729,6 @@ GstStream::doAudioData (GstBuffer * const buffer)
     msg.rate = tmp_audio_rate;
     msg.channels = tmp_audio_channels;
 
-    // TODO unlock/lock?
     video_stream->fireAudioMessage (&msg);
 
     page_pool->msgUnref (page_list.first);
@@ -1929,6 +1941,8 @@ GstStream::doVideoData (GstBuffer * const buffer)
         }
 
         if (report_avc_codec_data) {
+            // TODO vvv This doesn't sound correct.
+            //
             // Timestamps for codec data buffers are seemingly random.
 //            Uint64 const timestamp_nanosec = (Uint64) (GST_BUFFER_TIMESTAMP (avc_codec_data_buffer));
             Uint64 const timestamp_nanosec = 0;
@@ -1979,7 +1993,6 @@ GstStream::doVideoData (GstBuffer * const buffer)
                 logUnlock ();
             }
 
-            // TODO unlock/lock?
             video_stream->fireVideoMessage (&msg);
 
             page_pool->msgUnref (page_list.first);
@@ -1994,7 +2007,6 @@ GstStream::doVideoData (GstBuffer * const buffer)
     Size msg_len = 0;
 
     Uint64 const timestamp_nanosec = (Uint64) (GST_BUFFER_TIMESTAMP (buffer));
-//    logD_ (_func, "timestamp: 0x", fmt_hex, timestamp_nanosec);
 
     VideoStream::VideoMessage msg;
     msg.frame_type = VideoStream::VideoFrameType::InterFrame;
@@ -2036,8 +2048,8 @@ GstStream::doVideoData (GstBuffer * const buffer)
     if (is_keyframe) {
 	msg.frame_type = VideoStream::VideoFrameType::KeyFrame;
     } else {
-      // TODO We do not make difference between inter frames and
-      // disposable inter frames for Sorenson h.263 here.
+      // Note: We do not make distinction between inter frames and
+      //       disposable inter frames for Sorenson h.263 here.
     }
 
     PagePool::PageListHead page_list;
@@ -2060,8 +2072,6 @@ GstStream::doVideoData (GstBuffer * const buffer)
     }
     msg_len += GST_BUFFER_SIZE (buffer);
 
-//    hexdump (errs, ConstMemory (GST_BUFFER_DATA (buffer), GST_BUFFER_SIZE (buffer)));
-
     msg.timestamp_nanosec = timestamp_nanosec;
     msg.prechunk_size = (playback_item->enable_prechunking ? RtmpConnection::PrechunkSize : 0);
 
@@ -2070,15 +2080,15 @@ GstStream::doVideoData (GstBuffer * const buffer)
     msg.msg_len = msg_len;
     msg.msg_offset = 0;
 
+#if 0
     if (logLevelOn (frames, LogLevel::D)) {
         logD_ (_func, "Firing video message:");
         logLock ();
         PagePool::dumpPages (logs, &page_list);
         logUnlock ();
     }
+#endif
 
-//    logD_ (_func, "firing video message, ", msg_len, " bytes");
-    // TODO unlock/lock?
     video_stream->fireVideoMessage (&msg);
 
     page_pool->msgUnref (page_list.first);
@@ -2154,9 +2164,7 @@ GstStream::busSyncHandler (GstBus     * const /* bus */,
 
 			self->mutex.unlock ();
 
-			if (self->frontend)
-			    self->frontend.call (self->frontend->statusEvent);
-
+                        self->reportStatusEvents ();
 			goto _return;
 		    } else
 		    if (new_state == GST_STATE_PLAYING) {
@@ -2170,9 +2178,7 @@ GstStream::busSyncHandler (GstBus     * const /* bus */,
 		self->eos_pending = true;
 		self->mutex.unlock ();
 
-		if (self->frontend)
-		    self->frontend.call (self->frontend->statusEvent);
-
+                self->reportStatusEvents ();
 		goto _return;
 	    } break;
 	    case GST_MESSAGE_ERROR: {
@@ -2181,9 +2187,7 @@ GstStream::busSyncHandler (GstBus     * const /* bus */,
 		self->error_pending = true;
 		self->mutex.unlock ();
 
-		if (self->frontend)
-		    self->frontend.call (self->frontend->statusEvent);
-
+                self->reportStatusEvents ();
 		goto _return;
 	    } break;
 	    default:
@@ -2227,12 +2231,12 @@ GstStream::noVideoTimerTick (void * const _self)
 	self->no_video_pending = true;
 	self->mutex.unlock ();
 
-	self->reportStatusEvents ();
+	self->doReportStatusEvents ();
     } else {
 	self->got_video_pending = true;
 	self->mutex.unlock ();
 
-	self->reportStatusEvents ();
+	self->doReportStatusEvents ();
     }
 }
 
@@ -2372,7 +2376,7 @@ GstStream::createPipeline ()
         }
     }
 
-    Ref<WorkqueueItem> const new_item = grab (new WorkqueueItem);
+    Ref<WorkqueueItem> const new_item = grab (new (std::nothrow) WorkqueueItem);
     new_item->item_type = WorkqueueItem::ItemType_CreatePipeline;
 
     workqueue_list.prepend (new_item);
@@ -2382,7 +2386,7 @@ GstStream::createPipeline ()
 }
 
 void
-GstStream::reportStatusEvents ()
+GstStream::doReportStatusEvents ()
 {
     logD (stream, _func_);
 
@@ -2434,8 +2438,7 @@ GstStream::reportStatusEvents ()
 	}
 
 	if (no_video_pending) {
-	    if (got_video_pending)
-		got_video_pending = false;
+            got_video_pending = false;
 
 	    logD (stream, _func, "no_video_pending");
 	    no_video_pending = false;
@@ -2529,11 +2532,11 @@ GstStream::reportStatusEvents ()
 void
 GstStream::getTrafficStats (TrafficStats * const mt_nonnull ret_traffic_stats)
 {
-  StateMutexLock l (&mutex);
-
+    mutex.lock ();
     ret_traffic_stats->rx_bytes = rx_bytes;
     ret_traffic_stats->rx_audio_bytes = rx_audio_bytes;
     ret_traffic_stats->rx_video_bytes = rx_video_bytes;
+    mutex.unlock ();
 }
 
 void
@@ -2546,13 +2549,14 @@ GstStream::resetTrafficStats ()
 
 mt_const void
 GstStream::init (CbDesc<MediaSource::Frontend> const &frontend,
-                 Timers         * const timers,
-		 PagePool       * const page_pool,
-		 VideoStream    * const video_stream,
-		 VideoStream    * const mix_video_stream,
-		 Time             const initial_seek,
-                 ChannelOptions * const channel_opts,
-                 PlaybackItem   * const playback_item)
+                 Timers            * const timers,
+                 DeferredProcessor * const deferred_processor,
+		 PagePool          * const page_pool,
+		 VideoStream       * const video_stream,
+		 VideoStream       * const mix_video_stream,
+		 Time                const initial_seek,
+                 ChannelOptions    * const channel_opts,
+                 PlaybackItem      * const playback_item)
 {
     logD (pipeline, _this_func_);
 
@@ -2570,11 +2574,13 @@ GstStream::init (CbDesc<MediaSource::Frontend> const &frontend,
     if (initial_seek == 0)
         initial_seek_complete = true;
 
+    deferred_reg.setDeferredProcessor (deferred_processor);
+
     {
         workqueue_thread =
-                grab (new Thread (CbDesc<Thread::ThreadFunc> (workqueueThreadFunc,
-                                                              this,
-                                                              this)));
+                grab (new (std::nothrow) Thread (CbDesc<Thread::ThreadFunc> (workqueueThreadFunc,
+                                                                             this,
+                                                                             this)));
         if (!workqueue_thread->spawn (true /* joinable */))
             logE_ (_func, "Failed to spawn workqueue thread: ", exc->toString());
     }
@@ -2680,6 +2686,8 @@ GstStream::GstStream ()
       tlocal (NULL)
 {
     logD (pipeline, _this_func_);
+
+    deferred_task.cb = CbDesc<DeferredProcessor::TaskCallback> (deferredTask, this, this);
 }
 
 GstStream::~GstStream ()
@@ -2698,6 +2706,8 @@ GstStream::~GstStream ()
 
     if (avc_codec_data_buffer)
         gst_buffer_unref (avc_codec_data_buffer);
+
+    deferred_reg.release ();
 }
 
 }

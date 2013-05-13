@@ -1863,17 +1863,19 @@ MomentGstModule::parseRecordingsConfigSection ()
 
 Ref<MediaSource>
 MomentGstModule::createMediaSource (CbDesc<MediaSource::Frontend> const &frontend,
-                                    Timers         * const timers,
-                                    PagePool       * const page_pool,
-                                    VideoStream    * const video_stream,
-                                    VideoStream    * const mix_video_stream,
-                                    Time             const initial_seek,
-                                    ChannelOptions * const channel_opts,
-                                    PlaybackItem   * const playback_item)
+                                    Timers            * const timers,
+                                    DeferredProcessor * const deferred_processor,
+                                    PagePool          * const page_pool,
+                                    VideoStream       * const video_stream,
+                                    VideoStream       * const mix_video_stream,
+                                    Time                const initial_seek,
+                                    ChannelOptions    * const channel_opts,
+                                    PlaybackItem      * const playback_item)
 {
     Ref<GstStream> const gst_stream = grab (new (std::nothrow) GstStream);
     gst_stream->init (frontend,
                       timers,
+                      deferred_processor,
                       page_pool,
                       video_stream,
                       mix_video_stream,
@@ -2176,7 +2178,7 @@ MomentGstModule::MomentGstModule()
     : moment (NULL),
       timers (NULL),
       page_pool (NULL),
-      serve_playlist_json (false)
+      serve_playlist_json (true)
 {
     default_channel_opts = grab (new (std::nothrow) ChannelOptions);
     default_channel_opts->default_item = grab (new (std::nothrow) PlaybackItem);
