@@ -304,7 +304,8 @@ MomentGstModule::createDummyChannel (ConstMemory   const channel_name,
     mutex.unlock ();
     channel_set.addChannel (channel, channel_name);
 
-    channel->getPlayback()->setSingleItem (item);
+    if (!fetch_agent)
+        channel->getPlayback()->setSingleItem (item);
 }
 
 void
@@ -1700,6 +1701,9 @@ MomentGstModule::parseStreamsConfigSection ()
                 item->aac_perfect_timestamp = aac_perfect_timestamp;
                 item->sync_to_clock = sync_to_clock;
             }
+
+            if (!Moment::parseOverlayConfig (item_section, opts))
+                return Result::Failure;
 
 	    if (chain && !chain->isNull()) {
                 logD_ (_func, "chain, channel \"", opts->channel_name, "\"");
