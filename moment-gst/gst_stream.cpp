@@ -2300,10 +2300,7 @@ GstStream::mixStreamVideoMessage (VideoStream::VideoMessage * const mt_nonnull v
 
 	    unref_normalized_pages = true;
 
-	    RtmpConnection::normalizePrechunkedData (video_msg->page_pool,
-						     &video_msg->page_list,
-						     video_msg->msg_offset,
-						     video_msg->prechunk_size,
+	    RtmpConnection::normalizePrechunkedData (video_msg,
 						     video_msg->page_pool,
 						     &normalized_page_pool,
 						     &normalized_pages,
